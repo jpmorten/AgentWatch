@@ -28,6 +28,7 @@ def test_gui_flow(cfg, store):
     for fmt in ["summary", "inventory", "cyclonedx"]:
         assert c.get(f"/export/{fmt}").status_code == 200
     assert c.get("/changes").status_code == 200
+    assert c.get("/favicon.ico").status_code == 200
 
 
 def test_mcp_tools(cfg, store):

@@ -262,6 +262,12 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
         last, lines = BUFFER.since(since)
         return JSONResponse({"running": state.running, "task": state.task, "seq": last, "lines": lines})
 
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" '
+               'fill="#2f6fde"/><circle cx="16" cy="16" r="5" fill="#fff"/></svg>')
+        return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "max-age=86400"})
+
     @app.get("/log", response_class=HTMLResponse)
     def log_page(request: Request):
         return render(request, "log.html", lines=BUFFER.since(0, 1000)[1], log_file=str(LOG_FILE))
