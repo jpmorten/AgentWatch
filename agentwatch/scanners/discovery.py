@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 import sys
 
 from ..store import Store, normalize_mac
 from .nmap import is_root, parse_nmap_xml, run_nmap
+
+log = logging.getLogger("agentwatch")
 
 # macOS: "? (192.168.1.1) at a4:2b:b0:1:2:3 on en0 ifscope [ethernet]"
 # Linux: "? (192.168.1.1) at a4:2b:b0:01:02:03 [ether] on eth0"
@@ -46,14 +49,18 @@ def discover(store: Store, networks: list[str], nmap_path: str = "nmap") -> set[
         # Uden root bruger nmap TCP-ping; ARP-tabellen bagefter giver os MAC-adresserne.
         args += ["-PS22,80,443,445,554,8008,8080,62078", "-PA80,443"]
     for net in networks:
+        log.info("  Ping-sweep af %s (%s)", net, "ARP/raw – administrator" if is_root() else "TCP-ping – uden administrator")
         hosts = parse_nmap_xml(run_nmap([*args, net], nmap_path))
         arp = read_arp_table()
-        for h in hosts:
-            if not h.up:
-                continue
+        up = [h for h in hosts if h.up]
+        log.info("  %d værter svarede på ping, %d står i ARP-tabellen", len(up), len(arp))
+        for h in up:
             mac = h.mac or arp.get(h.ip)
+            known = store.find(ip=h.ip, mac=mac) is not None
             dev = store.upsert_observation(h.ip, mac, hostname=h.hostname, vendor=h.vendor)
             seen.add(dev.id)
+            log.info("    %-15s %-17s %-22s %s%s", h.ip, mac or "-", (dev.vendor or "")[:22], dev.hostname or "",
+                     "" if known else "  [NY]")
         # Enheder der kun står i ARP-tabellen (svarer ikke på ping, fx telefoner i dvale)
         known_ips = {h.ip for h in hosts}
         from ipaddress import ip_address, ip_network
@@ -63,4 +70,5 @@ def discover(store: Store, networks: list[str], nmap_path: str = "nmap") -> set[
             if ip not in known_ips and ip_address(ip) in n:
                 dev = store.upsert_observation(ip, mac)
                 seen.add(dev.id)
+                log.info("    %-15s %-17s (kun i ARP-tabellen – svarer ikke på ping)", ip, mac)
     return seen

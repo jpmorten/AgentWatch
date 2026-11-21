@@ -6,6 +6,7 @@ firmwareversion. SERVER-headeren afslører typisk OS + UPnP-stak + version.
 
 from __future__ import annotations
 
+import logging
 import socket
 import time
 import xml.etree.ElementTree as ET
@@ -15,6 +16,8 @@ import httpx
 
 from ..models import Firmware
 from ..store import Store
+
+log = logging.getLogger("agentwatch")
 
 MSEARCH = (
     "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\n"
@@ -106,8 +109,12 @@ def scan_ssdp(store: Store, networks: list[str], seconds: float = 4.0) -> set[st
 
     nets = [ip_network(n, strict=False) for n in networks]
     seen = set()
-    for ip, e in msearch(seconds).items():
+    log.info("  Sender SSDP M-SEARCH og lytter i %.0f sekunder ...", seconds)
+    responses = msearch(seconds)
+    log.info("  %d enheder svarede på SSDP/UPnP", len(responses))
+    for ip, e in responses.items():
         if not any(ip_address(ip) in n for n in nets):
+            log.debug("    %s ignoreret (uden for scope)", ip)
             continue
         desc: dict[str, str] = {}
         for loc in sorted(e["locations"]):
@@ -127,6 +134,10 @@ def scan_ssdp(store: Store, networks: list[str], seconds: float = 4.0) -> set[st
             hostname=None if existing and existing.hostname else desc.get("friendlyName"),
         )
         fw = desc.get("firmwareVersion") or desc.get("softwareVersion")
+        log.info("    %-15s %s | %s %s%s", ip, desc.get("friendlyName") or "", desc.get("manufacturer") or "",
+                 model or "", f" | firmware {fw}" if fw else "")
+        if e["server"]:
+            log.info("      SERVER: %s", e["server"][:150])
         if fw and "firmware" not in dev.manual_fields:
             dev.firmware = Firmware(version=fw, vendor=desc.get("manufacturer"), model=model, source="ssdp")
             store.save(dev)

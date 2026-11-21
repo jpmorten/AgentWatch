@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block body %}
+<h1>{{ title }}</h1>
+<div class="card">
+  <p style="color:var(--bad)">{{ message }}</p>
+  <p class="muted">Fejlen er også skrevet i logfilen: <span class="mono">{{ log_file }}</span>. Send gerne indholdet herunder, hvis du vil have hjælp.</p>
+  <pre class="logbox" style="height:auto;max-height:420px">{{ detail }}</pre>
+  <p><a href="javascript:history.back()">← Tilbage</a></p>
+</div>
+{% endblock %}

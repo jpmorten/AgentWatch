@@ -51,6 +51,18 @@ jobs:
           $r = Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing
           Stop-Process $p -Force
           if ($r.StatusCode -ne 200) { throw "GUI svarede ikke" }
+      - name: Browser-test af GUI'en (Edge) mod AgentWatch.exe
+        shell: pwsh
+        run: |
+          npm install --no-save --no-audit --no-fund playwright@1.49.1
+          $p = Start-Process ./dist/AgentWatch.exe -ArgumentList "gui","-c","exe.yaml","--port","8798" -PassThru `
+                 -RedirectStandardError gui-err.log -RedirectStandardOutput gui-out.log
+          Start-Sleep -Seconds 8
+          node tests/e2e/gui.e2e.js http://127.0.0.1:8798 msedge
+          $code = $LASTEXITCODE
+          Stop-Process $p -Force
+          Write-Host "---- GUI-log ----"; Get-Content gui-err.log, gui-out.log -ErrorAction SilentlyContinue | Select-Object -Last 60
+          exit $code
       - uses: actions/upload-artifact@v4
         with:
           name: AgentWatch-windows

@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block body %}
+<h1>Diagnostik</h1>
+<div class="card"><table>
+  {% for k, v in rows %}<tr><td class="muted" style="width:220px">{{ k }}</td><td class="mono">{{ v }}</td></tr>{% endfor %}
+</table></div>
+<div class="card scroll"><h2>Seneste kørsler</h2><table>
+  <tr><th>#</th><th>Start (UTC)</th><th>Varighed</th><th>Agenter</th><th>Enheder</th><th>Fejl</th></tr>
+  {% for r in runs %}<tr><td>{{ r.id }}</td><td class="mono">{{ r.started.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+    <td>{% if r.finished %}{{ ((r.finished - r.started).total_seconds())|round|int }}s{% else %}<span class="pill warn">afbrudt/kører</span>{% endif %}</td>
+    <td>{{ r.modules|join(", ") }}</td><td>{{ r.devices_found }}</td>
+    <td style="color:var(--bad)">{{ r.errors|join("; ") }}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">Ingen kørsler endnu.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

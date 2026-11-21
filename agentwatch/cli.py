@@ -23,6 +23,15 @@ if sys.platform == "win32":
             pass
 
 app = typer.Typer(help="AgentWatch – kortlæg dit netværk til sårbarhedsvurdering.", no_args_is_help=True)
+@app.callback()
+def _global(verbose: bool = typer.Option(False, "--verbose", "-v",
+                                          help="Vis alt, inkl. nmap-kommandoer og rå nmap-output")):
+    from .logsetup import LOG_FILE, setup_logging
+
+    setup_logging(verbose=verbose)
+    logging.getLogger("agentwatch").debug("Logfil: %s", LOG_FILE)
+
+
 ConfigOpt = typer.Option(None, "--config", "-c", help="Sti til agentwatch.yaml")
 
 
@@ -65,15 +74,15 @@ def scan(config: str = ConfigOpt,
     """Kør scanner-agenterne."""
     from .orchestrator import run_scan
 
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    from .logsetup import LOG_FILE
+
     cfg, store = _ctx(config)
     if profile:
         cfg.service_profile = profile  # type: ignore[assignment]
-    run = run_scan(cfg, store, [m for m in modules.split(",") if m] or None, progress=typer.echo)
-    typer.echo(f"\nFærdig: {run.devices_found} enheder set, {len(store.all())} i inventaret.")
+    run = run_scan(cfg, store, [m for m in modules.split(",") if m] or None)
     for e in run.errors:
         typer.secho(f"  fejl: {e}", fg="red")
+    typer.echo(f"Fuld log: {LOG_FILE}   ·   kør med -v for endnu mere detaljer")
 
 
 @app.command()
@@ -84,7 +93,12 @@ def gui(config: str = ConfigOpt, host: str = "127.0.0.1", port: int = 8765,
 
     from .web.app import create_app
 
+    from .logsetup import LOG_FILE
+
     cfg, store = _ctx(config)
+    log = logging.getLogger("agentwatch")
+    log.info("AgentWatch GUI kører på http://%s:%s/  (luk vinduet eller tryk Ctrl+C for at stoppe)", host, port)
+    log.info("Config: netværk %s · database %s · log %s", ", ".join(cfg.networks), cfg.db_file, LOG_FILE)
     if host not in ("127.0.0.1", "localhost", "::1"):
         typer.secho("Advarsel: GUI'en har ingen login – eksponér den ikke på netværket.", fg="yellow")
     if open_browser:

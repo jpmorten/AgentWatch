@@ -103,19 +103,24 @@ Interface: 192.168.1.23 --- 0xb
 
 
 def test_windows_unprivileged_flag(monkeypatch):
-    import subprocess
-
     from agentwatch.scanners import nmap
-
-    calls = {}
-
-    def fake_run(cmd, **kw):
-        calls["cmd"] = cmd
-        return subprocess.CompletedProcess(cmd, 0, stdout="<nmaprun/>", stderr="")
 
     monkeypatch.setattr(nmap, "IS_WINDOWS", True)
     monkeypatch.setattr(nmap, "is_root", lambda: False)
-    monkeypatch.setattr(nmap, "find_nmap", lambda p: "nmap.exe")
-    monkeypatch.setattr(nmap.subprocess, "run", fake_run)
-    nmap.run_nmap(["-sn", "192.168.1.0/24"])
-    assert calls["cmd"][:2] == ["nmap.exe", "--unprivileged"]
+    cmd = nmap.build_command("nmap.exe", ["-sn", "192.168.1.0/24"], "out.xml")
+    assert cmd[:2] == ["nmap.exe", "--unprivileged"] and "-oX" in cmd
+    monkeypatch.setattr(nmap, "is_root", lambda: True)
+    assert "--unprivileged" not in nmap.build_command("nmap.exe", ["-sn"], "out.xml")
+
+
+def test_run_nmap_streams_and_parses():
+    import shutil
+
+    import pytest
+
+    from agentwatch.scanners import nmap
+
+    if not shutil.which("nmap"):
+        pytest.skip("nmap ikke installeret")
+    xml = nmap.run_nmap(["-sn", "-Pn", "127.0.0.1"])
+    assert nmap.parse_nmap_xml(xml)[0].ip == "127.0.0.1"

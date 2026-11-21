@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..models import Service
+
+log = logging.getLogger("agentwatch")
 
 
 class NmapError(RuntimeError):
@@ -70,22 +78,65 @@ def install_hint() -> str:
     return "Installer med: sudo apt install nmap"
 
 
+# nmap-linjer der er interessante nok til at vise på INFO-niveau (resten går til DEBUG)
+_INTERESTING = re.compile(
+    r"Discovered open port|Nmap scan report|MAC Address|Stats:|% done|Service scan|OS details|"
+    r"Running:|Device type|Nmap done|WARNING|Failed|QUITTING", re.I)
+
+
+def build_command(exe: str, args: list[str], xml_path: str) -> list[str]:
+    cmd = [exe, "-oX", xml_path, "-v", "--stats-every", "15s", *args]
+    if IS_WINDOWS and not is_root() and "--unprivileged" not in args:
+        # Uden administrator kan nmap på Windows ikke bruge raw sockets (Npcap) – brug TCP connect
+        cmd.insert(1, "--unprivileged")
+    return cmd
+
+
+def _execute(cmd: list[str], timeout: int) -> int:
+    """Kør nmap og stream dens normale output linje for linje til loggen."""
+    kwargs = {}
+    if IS_WINDOWS:
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # intet konsolvindue fra GUI'en
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", bufsize=1, **kwargs)
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    try:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            if _INTERESTING.search(line):
+                log.info("    nmap: %s", line.strip())
+            else:
+                log.debug("    nmap: %s", line.strip())
+        return proc.wait()
+    finally:
+        timer.cancel()
+
+
 def run_nmap(args: list[str], nmap_path: str = "nmap", timeout: int = 1800) -> str:
     exe = find_nmap(nmap_path)
     if not exe:
         raise NmapError(f"nmap blev ikke fundet. {install_hint()}")
-    cmd = [exe, "-oX", "-", *args]
-    if IS_WINDOWS and not is_root() and "--unprivileged" not in args:
-        # Uden administrator kan nmap på Windows ikke bruge raw sockets (Npcap) – brug TCP connect
-        cmd.insert(1, "--unprivileged")
-    kwargs = {}
-    if IS_WINDOWS:
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # intet konsolvindue fra GUI'en
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          timeout=timeout, **kwargs)
-    if proc.returncode != 0 and not proc.stdout.strip():
-        raise NmapError(proc.stderr.strip() or f"nmap fejlede: {' '.join(cmd)}")
-    return proc.stdout
+    fd, xml_path = tempfile.mkstemp(prefix="agentwatch-", suffix=".xml")
+    os.close(fd)
+    try:
+        cmd = build_command(exe, args, xml_path)
+        log.debug("Kører: %s", " ".join(cmd))
+        t0 = time.monotonic()
+        rc = _execute(cmd, timeout)
+        xml_text = Path(xml_path).read_text(encoding="utf-8", errors="replace")
+        log.debug("nmap afsluttede med kode %s efter %.1fs", rc, time.monotonic() - t0)
+        if rc != 0 and "<host" not in xml_text:
+            raise NmapError(f"nmap fejlede (kode {rc}) – se loggen for detaljer. Kommando: {' '.join(cmd)}")
+        return xml_text
+    finally:
+        try:
+            os.unlink(xml_path)
+        except OSError:
+            pass
 
 
 def parse_nmap_xml(xml_text: str) -> list[NmapHost]:

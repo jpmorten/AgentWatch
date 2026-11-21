@@ -10,6 +10,7 @@ Kilder (se docs/dns-logs.md):
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import re
 from collections import defaultdict
@@ -22,6 +23,9 @@ from ..apps_catalog import build_index, load_catalog, match_domain
 from ..config import DnsSource
 from ..models import AppUsage
 from ..store import Store
+
+
+log = logging.getLogger("agentwatch")
 
 
 @dataclass
@@ -165,9 +169,15 @@ def unknown_domains(queries: list[Query], extra_catalog: str | None = None, top:
 
 def scan_dns(store: Store, src: DnsSource, extra_catalog: str | None = None) -> int:
     if src.type == "none":
+        log.info("  Ingen DNS-kilde konfigureret (dns.type: none) – springer over. Se docs/dns-logs.md")
         return 0
-    per_ip = aggregate(fetch_queries(src), extra_catalog)
+    log.info("  Henter DNS-opslag fra %s (%s) for de sidste %d timer", src.type, src.url or src.path, src.hours)
+    queries = fetch_queries(src)
+    per_ip = aggregate(queries, extra_catalog)
+    log.info("  %d opslag fra %d klienter, %d genkendte app-forbindelser",
+             len(queries), len({q.client_ip for q in queries}), sum(len(a) for a in per_ip.values()))
     for ip, apps in per_ip.items():
         dev = store.find(ip=ip) or store.upsert_observation(ip, None)
         store.merge_apps(dev, apps)
+        log.info("    %-15s %s", ip, ", ".join(f"{a.app} ({a.query_count})" for a in apps[:10]))
     return sum(len(a) for a in per_ip.values())

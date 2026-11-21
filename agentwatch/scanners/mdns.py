@@ -6,10 +6,13 @@ Chromecast `md`/`fn`, printere `ty`/`product`).
 
 from __future__ import annotations
 
+import logging
 import socket
 import time
 
 from ..store import Store
+
+log = logging.getLogger("agentwatch")
 
 INTERESTING_TXT = {
     "md": "model", "model": "model", "am": "model", "ty": "model", "product": "model", "usb_mdl": "model",
@@ -87,7 +90,11 @@ def browse(seconds: float = 6.0) -> dict[str, dict]:
 
 def apply_mdns(store: Store, found: dict[str, dict]) -> set[str]:
     seen = set()
+    log.info("  %d enheder annoncerer sig via mDNS/Bonjour", len(found))
     for ip, e in found.items():
+        log.info("    %-15s %s  %s", ip, e["hostname"] or "", ", ".join(sorted(e["services"]))[:120])
+        if e["txt"]:
+            log.info("      TXT: %s", ", ".join(f"{k}={v}" for k, v in e["txt"].items())[:160])
         txt = e["txt"]
         dtype = next((TYPE_HINTS[t] for t in e["types"] if t in TYPE_HINTS), None)
         dev = store.upsert_observation(
@@ -106,4 +113,5 @@ def apply_mdns(store: Store, found: dict[str, dict]) -> set[str]:
 
 
 def scan_mdns(store: Store, seconds: float = 6.0) -> set[str]:
+    log.info("  Lytter efter mDNS-annonceringer i %.0f sekunder ...", seconds)
     return apply_mdns(store, browse(seconds))

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+
 from ..scope import ensure_in_scope
 from ..store import Store
 from .nmap import NmapHost, is_root, parse_nmap_xml, run_nmap
@@ -13,6 +16,8 @@ SAFE_SCRIPTS = [
     "ssl-enum-ciphers", "http-generator", "mqtt-subscribe",
 ]
 
+
+log = logging.getLogger("agentwatch")
 
 UDP_PORTS = "53,67,69,123,137,161,500,1900,3478,5353,5683,10001"
 
@@ -55,8 +60,20 @@ def scan_services(store: Store, ips: list[str], networks: list[str], profile: st
         ensure_in_scope(ip, networks)
     if not ips:
         return []
-    hosts = parse_nmap_xml(run_nmap([*build_args(profile, ports, scripts), *ips], nmap_path))
+    args = build_args(profile, ports, scripts)
+    log.info("  Versionsscanning af %d vært(er), profil=%s, %s%s", len(ips), profile,
+             "administrator (OS-detektion til)" if is_root() else "uden administrator (ingen OS-detektion)",
+             f", porte={ports}" if ports else "")
+    log.info("  Det kan tage flere minutter – nmap rapporterer fremdrift undervejs")
+    t0 = time.monotonic()
+    hosts = parse_nmap_xml(run_nmap([*args, *ips], nmap_path))
     for h in hosts:
-        if h.up:
-            apply_host(store, h)
+        if not h.up:
+            continue
+        apply_host(store, h)
+        log.info("    %s%s – %d åbne porte", h.ip, f" ({h.os_name}, {h.os_accuracy}%)" if h.os_name else "",
+                 len(h.services))
+        for s in h.services:
+            log.info("      %5d/%s %-14s %s %s", s.port, s.protocol, s.name or "", s.product or "", s.version or "")
+    log.info("  Versionsscanning færdig på %.0fs", time.monotonic() - t0)
     return hosts

@@ -2,5 +2,11 @@
 __pycache__/
 *.egg-info/
 *.db
+*.db-wal
+*.db-shm
 .pytest_cache/
 agentwatch.yaml
+node_modules/
+build/
+dist/
+*.spec

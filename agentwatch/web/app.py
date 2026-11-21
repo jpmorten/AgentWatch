@@ -7,7 +7,12 @@ din lokale AgentWatch).
 
 from __future__ import annotations
 
+import logging
+import os
+import platform
+import sys
 import threading
+import traceback
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -17,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..config import Config
 from ..export import FORMATS
+from ..logsetup import BUFFER, LOG, LOG_FILE
 from ..models import Device, Firmware, Service, WebApp
 from ..store import EDITABLE_FIELDS, Store, device_key, dumps, normalize_mac
 
@@ -28,13 +34,30 @@ DEVICE_TYPES = ["router", "access-point", "switch", "computer", "phone", "tablet
 class ScanState:
     def __init__(self):
         self.running = False
-        self.log: list[str] = []
+        self.task = ""  # "scan" eller "analyse"
         self.lock = threading.Lock()
+
+    @property
+    def log(self) -> list[str]:
+        return BUFFER.since(0, 15)[1]
 
 
 def create_app(cfg: Config, store: Store) -> FastAPI:
     app = FastAPI(title="AgentWatch", docs_url=None, redoc_url=None)
     state = ScanState()
+    if BUFFER not in LOG.handlers:  # fx i tests, hvor CLI'en ikke har sat logging op
+        LOG.addHandler(BUFFER)
+        LOG.setLevel(logging.DEBUG)
+
+    @app.exception_handler(Exception)
+    async def on_error(request: Request, exc: Exception):
+        LOG.error("Fejl i GUI ved %s %s: %s", request.method, request.url.path, exc)
+        LOG.debug("".join(traceback.format_exception(exc)))
+        return TEMPLATES.TemplateResponse(request, "error.html", {
+            "cfg": cfg, "scan": state, "env": {"admin": True, "nmap_ok": True},
+            "title": "Noget gik galt", "message": f"{type(exc).__name__}: {exc}",
+            "detail": "".join(traceback.format_exception(exc))[-3000:], "log_file": str(LOG_FILE),
+        }, status_code=500)
 
     @app.middleware("http")
     async def same_origin_post(request: Request, call_next):
@@ -42,7 +65,12 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
             src = request.headers.get("origin") or request.headers.get("referer")
             host = request.headers.get("host", "")
             if not src or urlparse(src).netloc != host:
-                return Response("Cross-origin POST afvist", status_code=403)
+                LOG.warning("POST %s afvist: origin=%r host=%r", request.url.path, src, host)
+                return HTMLResponse(
+                    "<h3>Handlingen blev afvist (CSRF-beskyttelse)</h3><p>Browseren sendte ikke en Origin/Referer "
+                    f"der matcher <code>{host}</code> (fik <code>{src}</code>). Åbn GUI'en via præcis samme adresse "
+                    "som den kører på, fx <a href='http://127.0.0.1:8765/'>http://127.0.0.1:8765/</a>, og slå evt. "
+                    "browser-udvidelser der fjerner Referer fra for denne side.</p>", status_code=403)
         return await call_next(request)
 
     def render(request: Request, name: str, **ctx):
@@ -180,29 +208,95 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
         return render(request, "changes.html", changes=store.changes(limit=300),
                       names={d.id: d.hostname or d.model or d.ip for d in store.all()})
 
-    @app.post("/scan")
-    def scan(modules: str = Form("")):
-        from ..orchestrator import run_scan
-
+    def start_background(task: str, fn) -> bool:
         with state.lock:
             if state.running:
-                return RedirectResponse("/", status_code=303)
-            state.running, state.log = True, []
+                LOG.warning("%s er allerede i gang – vent til den er færdig", state.task)
+                return False
+            state.running, state.task = True, task
 
         def worker():
             try:
-                run_scan(cfg, store, [m for m in modules.split(",") if m] or None, progress=state.log.append)
+                fn()
             except Exception as exc:
-                state.log.append(f"FEJL: {exc}")
+                LOG.error("%s fejlede: %s", task, exc)
+                LOG.debug("".join(traceback.format_exception(exc)))
             finally:
-                state.running = False
+                state.running, state.task = False, ""
 
-        threading.Thread(target=worker, daemon=True).start()
-        return RedirectResponse("/", status_code=303)
+        threading.Thread(target=worker, daemon=True, name=f"agentwatch-{task}").start()
+        return True
+
+    @app.post("/scan")
+    def scan(modules: str = Form(""), profile: str = Form("")):
+        from ..orchestrator import run_scan
+
+        if profile in ("quick", "full"):
+            cfg.service_profile = profile  # type: ignore[assignment]
+        start_background("scanning", lambda: run_scan(cfg, store, [m for m in modules.split(",") if m] or None))
+        return RedirectResponse("/#log", status_code=303)
+
+    @app.post("/analyze")
+    def analyze(instruction: str = Form("")):
+        def job():
+            try:
+                from ..analyst import run_analyst
+            except ImportError:
+                LOG.error("Claude-analytikeren kræver pakken 'anthropic' (pip install agentwatch[agent])")
+                return
+            if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+                LOG.warning("ANTHROPIC_API_KEY er ikke sat – forsøger med 'ant auth login'-profil, hvis den findes")
+            LOG.info("=" * 70)
+            LOG.info("Claude-analytiker startet")
+            result = run_analyst(cfg, store, instruction or None, on_text=lambda t: LOG.info("  %s", t))
+            LOG.info("Analyse færdig:")
+            for line in result.splitlines():
+                LOG.info("  %s", line)
+            LOG.info("=" * 70)
+
+        start_background("analyse", job)
+        return RedirectResponse("/#log", status_code=303)
 
     @app.get("/scan/status")
-    def scan_status():
-        return JSONResponse({"running": state.running, "log": state.log[-50:]})
+    def scan_status(since: int = 0):
+        last, lines = BUFFER.since(since)
+        return JSONResponse({"running": state.running, "task": state.task, "seq": last, "lines": lines})
+
+    @app.get("/log", response_class=HTMLResponse)
+    def log_page(request: Request):
+        return render(request, "log.html", lines=BUFFER.since(0, 1000)[1], log_file=str(LOG_FILE))
+
+    @app.get("/diag", response_class=HTMLResponse)
+    def diag(request: Request):
+        import subprocess
+
+        from .. import __version__
+        from ..scanners.nmap import find_nmap, is_root
+
+        nmap = find_nmap(cfg.nmap_path)
+        nmap_version = ""
+        if nmap:
+            try:
+                nmap_version = subprocess.run([nmap, "--version"], capture_output=True, text=True, timeout=10,
+                                              errors="replace").stdout.splitlines()[0]
+            except Exception as exc:
+                nmap_version = f"kunne ikke køres: {exc}"
+        npcap = ""
+        if sys.platform == "win32":
+            npcap = "installeret" if os.path.exists(r"C:\Windows\System32\Npcap") else "IKKE fundet (installer via nmap-installeren)"
+        rows = [
+            ("AgentWatch", __version__), ("Python", sys.version.split()[0]),
+            ("OS", f"{platform.system()} {platform.release()} ({platform.machine()})"),
+            ("Administrator/root", "ja" if is_root() else "nej – OS-detektion/UDP slået fra"),
+            ("nmap", nmap or "IKKE FUNDET"), ("nmap-version", nmap_version),
+            *([("Npcap", npcap)] if npcap else []),
+            ("Netværk (scope)", ", ".join(cfg.networks)), ("Scan-profil", cfg.service_profile),
+            ("Database", str(cfg.db_file)), ("Logfil", str(LOG_FILE)),
+            ("DNS-kilde", f"{cfg.dns.type} {cfg.dns.url or cfg.dns.path or ''}"),
+            ("Anthropic API-nøgle", "sat" if os.environ.get("ANTHROPIC_API_KEY") else "ikke sat (kun nødvendig til analyse)"),
+            ("Enheder i inventaret", str(len(store.all()))),
+        ]
+        return render(request, "diag.html", rows=rows, runs=store.runs(10))
 
     @app.get("/export/{fmt}")
     def export(fmt: str):

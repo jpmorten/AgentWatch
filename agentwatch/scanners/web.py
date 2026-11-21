@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import socket
 import ssl
@@ -11,6 +12,8 @@ import httpx
 
 from ..models import Device, TlsInfo, WebApp
 from ..store import Store
+
+log = logging.getLogger("agentwatch")
 
 WEB_SERVICE_NAMES = ("http", "https", "ssl/http", "http-proxy", "http-alt", "https-alt", "upnp", "rtsp")
 TLS_PORTS = {443, 8443, 5001, 9443, 4443, 10443}
@@ -148,10 +151,22 @@ def scan_web(store: Store, extra_ports: list[int], timeout: float = 5.0, device_
     devices = [d for d in store.all() if d.ip and d.online and (device_ids is None or d.id in device_ids)]
     jobs = [(d, u) for d in devices for u in candidate_urls(d, extra_ports)]
     results: dict[str, list[WebApp]] = {}
+    log.info("  Tester %d mulige webinterfaces på %d enheder", len(jobs), len({d.id for d, _ in jobs}))
     with ThreadPoolExecutor(max_workers=16) as ex:
-        for (d, _), app in zip(jobs, ex.map(lambda j: probe(j[1], timeout), jobs)):
+        for (d, url), app in zip(jobs, ex.map(lambda j: probe(j[1], timeout), jobs)):
             if app:
                 results.setdefault(d.id, []).append(app)
+                extra = []
+                if app.technologies:
+                    extra.append(", ".join(app.technologies))
+                if app.auth_required:
+                    extra.append("login")
+                if app.tls and app.tls.self_signed:
+                    extra.append("selvsigneret cert")
+                log.info("    %s [%s] %s%s", url, app.status, app.title or app.server or "",
+                         f"  ({'; '.join(extra)})" if extra else "")
+            else:
+                log.info("    %s – intet svar", url)
     for d in devices:
         if d.id in results:
             store.set_webapps(store.get(d.id) or d, results[d.id])
