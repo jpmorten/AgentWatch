@@ -1,0 +1,28 @@
+# AgentWatch-konfiguration. `agentwatch init` kopierer denne til ~/.agentwatch/config.yaml.
+
+# Kun disse netværk må scannes. Skal være private (RFC1918) og mindst /16.
+networks:
+  - 192.168.1.0/24
+
+db_path: ~/.agentwatch/agentwatch.db
+nmap_path: nmap
+
+# quick: top 200 TCP-porte (hurtigt, ingen sudo)
+# full:  TCP 1-10000 + udvalgte UDP-porte + OS-detektion (kør med sudo)
+service_profile: quick
+
+# Porte der også testes som webinterfaces (Chromecast, Plex, Synology, ...)
+extra_web_ports: [8008, 8009, 8443, 8888, 32400, 5000, 5001, 9000]
+http_timeout: 5.0
+
+# DNS-logs til app-/streaming-brug. Se docs/dns-logs.md.
+dns:
+  type: none          # none | adguard | pihole | dnsmasq_log | csv
+  # url: http://127.0.0.1:3000   # AdGuard Home / Pi-hole
+  # username: admin               # AdGuard Home
+  # password_env: AGENTWATCH_DNS_PASSWORD   # adgangskoden læses fra denne miljøvariabel
+  # path: ~/router-dns.log        # til dnsmasq_log / csv
+  hours: 24
+
+# Model til `agentwatch analyze`
+analyst_model: claude-opus-5-5

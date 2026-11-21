@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block body %}
+<h1>Ændringer</h1>
+<div class="card scroll"><table>
+  <tr><th>Tid (UTC)</th><th>Enhed</th><th>Hændelse</th><th>Detalje</th></tr>
+  {% for c in changes %}<tr>
+    <td class="mono muted">{{ c.ts[:19] }}</td>
+    <td><a href="/device?id={{ c.device_id|urlencode }}">{{ names.get(c.device_id) or c.device_id }}</a></td>
+    <td><span class="pill {% if c.kind in ('new_device','port_opened','new_app') %}warn{% endif %}">{{ c.kind }}</span></td>
+    <td>{{ c.detail }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Ingen ændringer endnu.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

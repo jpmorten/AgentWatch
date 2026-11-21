@@ -1,0 +1,103 @@
+{% extends "base.html" %}{% block body %}
+<h1>{{ d.hostname or d.model or d.ip }} <span class="muted mono" style="font-size:13px">{{ d.id }}</span></h1>
+<div class="card">
+  <h2>Stamdata <span class="muted" style="font-weight:400">– ændrede felter låses, så scannere ikke overskriver dem</span></h2>
+  <form method="post" action="/device/edit">
+    <input type="hidden" name="id" value="{{ d.id }}">
+    <div class="grid">
+      {% for f in fields %}
+      <div><label>{{ f }} {% if f in d.manual_fields %}🔒 <input type="checkbox" name="unlock_{{ f }}" style="width:auto"> lås op{% endif %}</label>
+      {% if f == "device_type" %}
+        <select name="device_type"><option value=""></option>{% for t in device_types %}<option {% if d.device_type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}{% if d.device_type and d.device_type not in device_types %}<option selected>{{ d.device_type }}</option>{% endif %}</select>
+      {% elif f == "trusted" %}
+        <select name="trusted"><option value="" {% if d.trusted is none %}selected{% endif %}>ikke vurderet</option><option value="yes" {% if d.trusted == True %}selected{% endif %}>ja, kendt enhed</option><option value="no" {% if d.trusted == False %}selected{% endif %}>nej, ukendt</option></select>
+      {% elif f == "tags" %}<input name="tags" value="{{ d.tags|join(', ') }}">
+      {% elif f == "notes" %}<textarea name="notes" rows="2">{{ d.notes or "" }}</textarea>
+      {% else %}<input name="{{ f }}" value="{{ d[f] or '' }}">{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="row" style="margin-top:12px"><button>Gem</button>
+      <span class="muted">IP {{ d.ip }} · MAC {{ d.mac or "?" }} · først set {{ d.first_seen.strftime("%Y-%m-%d") }} · sidst set {{ d.last_seen.strftime("%Y-%m-%d %H:%M") }}</span></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Firmware {% if d.firmware %}<span class="pill">{{ d.firmware.source }}</span>{% endif %}</h2>
+  <form method="post" action="/device/firmware" class="grid">
+    <input type="hidden" name="id" value="{{ d.id }}">
+    <div><label>Version</label><input name="version" value="{{ d.firmware.version if d.firmware and d.firmware.version else '' }}" placeholder="fx 3.0.0.4.388_24198"></div>
+    <div><label>Producent</label><input name="vendor" value="{{ d.firmware.vendor if d.firmware and d.firmware.vendor else (d.vendor or '') }}"></div>
+    <div><label>Model</label><input name="model" value="{{ d.firmware.model if d.firmware and d.firmware.model else (d.model or '') }}"></div>
+    <div><label>CPE (valgfri)</label><input name="cpe" value="{{ d.firmware.cpe if d.firmware and d.firmware.cpe else '' }}" placeholder="cpe:2.3:o:asus:rt-ax88u_firmware:…"></div>
+    <div style="align-self:end"><button>Gem firmware</button></div>
+  </form>
+</div>
+
+<div class="card scroll">
+  <h2>Services</h2>
+  <table><tr><th>Port</th><th>Service</th><th>Produkt / version</th><th>CPE</th><th>Kilde</th><th></th></tr>
+  {% for s in d.services %}<tr>
+    <td class="mono">{{ s.port }}/{{ s.protocol }}</td><td>{{ s.name or "" }}</td>
+    <td>{{ s.product or "" }} {{ s.version or "" }}<div class="muted">{{ s.extra_info or "" }}</div></td>
+    <td class="mono">{{ s.cpe|join(", ") }}</td><td><span class="pill">{{ s.source }}</span></td>
+    <td><form method="post" action="/device/service/delete"><input type="hidden" name="id" value="{{ d.id }}"><input type="hidden" name="port" value="{{ s.port }}"><input type="hidden" name="protocol" value="{{ s.protocol }}"><button class="secondary">fjern</button></form></td>
+  </tr>{% else %}<tr><td colspan="6" class="muted">Ingen åbne services fundet.</td></tr>{% endfor %}
+  </table>
+  <form method="post" action="/device/service" class="grid" style="margin-top:12px">
+    <input type="hidden" name="id" value="{{ d.id }}">
+    <div><label>Port</label><input name="port" type="number" required></div>
+    <div><label>Protokol</label><select name="protocol"><option>tcp</option><option>udp</option></select></div>
+    <div><label>Service</label><input name="name" placeholder="http"></div>
+    <div><label>Produkt</label><input name="product"></div>
+    <div><label>Version</label><input name="version"></div>
+    <div><label>CPE</label><input name="cpe"></div>
+    <div style="align-self:end"><button class="secondary">+ Tilføj service</button></div>
+  </form>
+</div>
+
+<div class="card scroll">
+  <h2>Webinterfaces</h2>
+  <table><tr><th>URL</th><th>Titel</th><th>Teknologi</th><th>Login</th><th>TLS</th></tr>
+  {% for w in d.webapps %}<tr>
+    <td class="mono"><a href="{{ w.url }}" target="_blank" rel="noopener noreferrer">{{ w.url }}</a> <span class="muted">{{ w.status or "" }}</span></td>
+    <td>{{ w.title or "" }}</td>
+    <td>{% if w.server %}<span class="pill">{{ w.server }}</span>{% endif %}{% for t in w.technologies %}<span class="pill">{{ t }}</span>{% endfor %}</td>
+    <td>{% if w.auth_required %}<span class="pill ok">ja</span>{% elif w.auth_required == False %}<span class="pill warn">nej</span>{% endif %}</td>
+    <td class="muted">{% if w.tls %}{{ w.tls.protocol or "" }}{% if w.tls.self_signed %} · selvsigneret{% endif %}{% if w.tls.not_after %} · udløber {{ w.tls.not_after[:10] }}{% endif %}{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="5" class="muted">Ingen webinterfaces fundet.</td></tr>{% endfor %}
+  </table>
+  <form method="post" action="/device/webapp" class="grid" style="margin-top:12px">
+    <input type="hidden" name="id" value="{{ d.id }}">
+    <div><label>URL</label><input name="url" required placeholder="http://192.168.1.1/"></div>
+    <div><label>Titel</label><input name="title"></div>
+    <div><label>Teknologier (komma)</label><input name="technologies"></div>
+    <div style="align-self:end"><button class="secondary">+ Tilføj webapp</button></div>
+  </form>
+</div>
+
+<div class="card scroll">
+  <h2>Apps / tjenester (fra DNS)</h2>
+  <table><tr><th>App</th><th>Kategori</th><th>Opslag</th><th>Sidst set</th><th>Domæner</th></tr>
+  {% for a in d.apps %}<tr><td>{{ a.app }}</td><td><span class="pill {% if a.category=='remote-access' %}bad{% elif a.category=='telemetry' %}warn{% endif %}">{{ a.category }}</span></td>
+    <td>{{ a.query_count }}</td><td class="muted">{{ a.last_seen.strftime("%Y-%m-%d %H:%M") if a.last_seen else "" }}</td><td class="mono muted">{{ a.domains[:5]|join(", ") }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">Ingen DNS-data for denne enhed (se docs/dns-logs.md).</td></tr>{% endfor %}
+  </table>
+</div>
+
+{% if d.mdns_services or d.upnp %}
+<div class="card"><h2>mDNS / UPnP</h2>
+  {% for s in d.mdns_services %}<span class="pill mono">{{ s }}</span>{% endfor %}
+  <table style="margin-top:8px">{% for k, v in d.upnp.items() %}<tr><td class="muted">{{ k }}</td><td class="mono">{{ v }}</td></tr>{% endfor %}</table>
+</div>{% endif %}
+
+{% if d.analyst_notes %}<div class="card"><h2>Noter fra analytiker / vurdering</h2>
+  {% for n in d.analyst_notes|reverse %}<p class="mono" style="margin:4px 0">{{ n }}</p>{% endfor %}</div>{% endif %}
+
+{% if changes %}<div class="card"><h2>Historik</h2><table>
+  {% for c in changes %}<tr><td class="muted mono">{{ c.ts[:16] }}</td><td>{{ c.kind }}</td><td>{{ c.detail }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+
+<form method="post" action="/device/delete" onsubmit="return confirm('Slet enheden fra inventaret?')">
+  <input type="hidden" name="id" value="{{ d.id }}"><button class="danger">Slet enhed</button></form>
+{% endblock %}

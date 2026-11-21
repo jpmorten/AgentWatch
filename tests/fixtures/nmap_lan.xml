@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<nmaprun scanner="nmap" args="nmap -sV -O" version="7.95">
+<host><status state="up"/>
+<address addr="192.168.1.1" addrtype="ipv4"/><address addr="A4:2B:B0:11:22:33" addrtype="mac" vendor="TP-Link"/>
+<hostnames><hostname name="router.lan" type="PTR"/></hostnames>
+<ports>
+<port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="Dropbear sshd" version="2022.83" devicetype="router"><cpe>cpe:/a:matt_johnston:dropbear_ssh_server:2022.83</cpe></service></port>
+<port protocol="tcp" portid="80"><state state="open"/><service name="http" product="LuCI Lua http config"><cpe>cpe:/a:openwrt:luci</cpe></service></port>
+<port protocol="tcp" portid="81"><state state="closed"/><service name="hosts2-ns"/></port>
+<port protocol="udp" portid="53"><state state="open"/><service name="domain" product="dnsmasq" version="2.90"><cpe>cpe:/a:thekelleys:dnsmasq:2.90</cpe></service></port>
+</ports>
+<os><osmatch name="OpenWrt 21.02 (Linux 5.4)" accuracy="96"><osclass type="WAP" vendor="Linux" osfamily="Linux"><cpe>cpe:/o:linux:linux_kernel:5.4</cpe></osclass></osmatch>
+<osmatch name="Linux 4.x" accuracy="90"><osclass type="general purpose"/></osmatch></os>
+</host>
+<host><status state="down"/><address addr="192.168.1.99" addrtype="ipv4"/></host>
+</nmaprun>

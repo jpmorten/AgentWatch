@@ -1,0 +1,6 @@
+Nov 21 10:00:01 dnsmasq[123]: query[A] occ-0-2774-2773.1.nflxso.net from 192.168.1.50
+Nov 21 10:00:02 dnsmasq[123]: query[AAAA] api-global.netflix.com from 192.168.1.50
+Nov 21 10:00:03 dnsmasq[123]: forwarded api-global.netflix.com to 1.1.1.1
+Nov 21 10:01:00 dnsmasq[123]: query[A] router15.teamviewer.com from 192.168.1.20
+Nov 21 10:02:00 dnsmasq[123]: query[A] log-ingestion-eu.samsungacr.com from 192.168.1.50
+Nov 21 10:03:00 dnsmasq[123]: query[A] example.org from 192.168.1.20

@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block body %}
+<h1>Tilføj enhed manuelt</h1>
+<div class="card">
+  <p class="muted" style="margin-top:0">Til enheder scanneren ikke kan se (fx bag et andet netværk, enheder der sover, eller hvor du kender model og firmware bedre end scanneren).</p>
+  <form method="post" action="/new" class="grid">
+    <div><label>Navn</label><input name="hostname" placeholder="Stue-TV"></div>
+    <div><label>IP</label><input name="ip"></div>
+    <div><label>MAC</label><input name="mac"></div>
+    <div><label>Producent</label><input name="vendor" placeholder="Samsung"></div>
+    <div><label>Type</label><select name="device_type"><option value=""></option>{% for t in device_types %}<option>{{ t }}</option>{% endfor %}</select></div>
+    <div><label>Model</label><input name="model" placeholder="QE55Q80B"></div>
+    <div><label>OS</label><input name="os" placeholder="Tizen 6.5"></div>
+    <div><label>Firmware</label><input name="firmware" placeholder="1402.5"></div>
+    <div style="grid-column:1/-1"><label>Noter</label><textarea name="notes" rows="2"></textarea></div>
+    <div><button>Gem</button></div>
+  </form>
+</div>
+{% endblock %}

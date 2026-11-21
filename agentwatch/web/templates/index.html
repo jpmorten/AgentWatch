@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block body %}
+<div class="stats" style="margin-bottom:16px">
+  <div class="stat"><div class="n">{{ stats.online }}/{{ stats.devices }}</div><div class="muted">online / i alt</div></div>
+  <div class="stat"><div class="n">{{ stats.services }}</div><div class="muted">åbne services</div></div>
+  <div class="stat"><div class="n">{{ stats.webapps }}</div><div class="muted">webinterfaces</div></div>
+  <div class="stat"><div class="n">{{ stats.no_firmware }}</div><div class="muted">mangler firmware</div></div>
+  <div class="stat"><div class="n">{{ stats.unknown_type }}</div><div class="muted">ukendt type</div></div>
+</div>
+<div class="card">
+  <form method="post" action="/scan" class="row">
+    <select name="modules" style="width:auto">
+      <option value="">Fuld scanning (alle agenter)</option>
+      <option value="discovery,mdns,ssdp">Kun discovery (hurtig)</option>
+      <option value="services,web">Services + web</option>
+      <option value="dns">Kun DNS/app-brug</option>
+    </select>
+    <button {% if scan.running %}disabled{% endif %}>{% if scan.running %}Scanner…{% else %}Start scanning{% endif %}</button>
+    <span class="muted">Sidste kørsel: {% if last_run %}{{ last_run.started.strftime("%Y-%m-%d %H:%M") }} UTC, {{ last_run.devices_found }} enheder{% if last_run.errors %}, <span style="color:var(--bad)">{{ last_run.errors|length }} fejl</span>{% endif %}{% else %}aldrig{% endif %}</span>
+  </form>
+  <pre id="log" class="mono muted" style="margin-top:10px">{{ scan.log[-8:]|join("\n") }}</pre>
+</div>
+<div class="card">
+  <form class="row" style="margin-bottom:10px">
+    <input name="q" value="{{ q }}" placeholder="Søg (ip, navn, software, app …)" style="max-width:320px">
+    <select name="show" style="width:auto"><option value="online" {% if show=="online" %}selected{% endif %}>Kun online</option><option value="all" {% if show=="all" %}selected{% endif %}>Alle</option></select>
+    <button class="secondary">Filtrér</button>
+  </form>
+  <div class="scroll"><table>
+    <tr><th>IP</th><th>Navn</th><th>Type</th><th>Producent / model</th><th>OS / firmware</th><th>Services</th><th>Apps</th></tr>
+    {% for d in devices %}
+    <tr>
+      <td class="mono"><a href="/device?id={{ d.id|urlencode }}">{{ d.ip or "—" }}</a>{% if not d.online %} <span class="pill">offline</span>{% endif %}<div class="muted">{{ d.mac or "" }}</div></td>
+      <td>{{ d.hostname or "" }}{% if d.trusted == False %} <span class="pill bad">ukendt</span>{% endif %}</td>
+      <td>{% if d.device_type %}{{ d.device_type }}{% else %}<span class="pill warn">?</span>{% endif %}</td>
+      <td>{{ d.vendor or "" }}<div class="muted">{{ d.model or "" }}</div></td>
+      <td>{{ d.os or "" }}<div class="muted">{% if d.firmware and d.firmware.version %}fw {{ d.firmware.version }}{% else %}<span class="pill warn">ingen firmware</span>{% endif %}</div></td>
+      <td class="mono">{% for s in d.services[:6] %}<span class="pill">{{ s.port }}{% if s.product %} {{ s.product }}{% endif %}</span>{% endfor %}{% if d.services|length > 6 %}<span class="muted">+{{ d.services|length - 6 }}</span>{% endif %}</td>
+      <td>{% for a in d.apps[:4] %}<span class="pill {% if a.category=='remote-access' %}bad{% elif a.category=='telemetry' %}warn{% endif %}">{{ a.app }}</span>{% endfor %}</td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="muted">Ingen enheder endnu – start en scanning eller tilføj manuelt.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% if scan.running %}<script>
+setInterval(async()=>{const r=await fetch('/scan/status');const j=await r.json();document.getElementById('log').textContent=j.log.slice(-8).join('\n');if(!j.running)location.reload()},2000)
+</script>{% endif %}
+{% endblock %}

@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major></specVersion>
+<device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType>
+<friendlyName>[TV] Samsung Q80 Series (55)</friendlyName><manufacturer>Samsung Electronics</manufacturer>
+<modelName>QE55Q80B</modelName><modelNumber>AllShare1.0</modelNumber><softwareVersion>T-PTMFDEUC-1402.5</softwareVersion>
+</device></root>
