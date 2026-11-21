@@ -88,3 +88,34 @@ def test_dns_aggregation():
     assert [a.app for a in per_ip["192.168.1.20"]] == ["TeamViewer"]
     assert per_ip["192.168.1.30"][0].app == "Spotify"
     assert per_ip["192.168.1.30"][0].last_seen == datetime(2026, 11, 21, 9, 5, tzinfo=timezone.utc)
+
+
+def test_parse_arp_windows():
+    out = """
+Interface: 192.168.1.23 --- 0xb
+  Internetadresse       Fysisk adresse        Type
+  192.168.1.1           a4-2b-b0-11-22-33     dynamisk
+  192.168.1.40          3C-22-FB-AA-BB-CC     dynamic
+  192.168.1.255         ff-ff-ff-ff-ff-ff     statisk
+  224.0.0.22            01-00-5e-00-00-16     static
+"""
+    assert parse_arp(out) == {"192.168.1.1": "a4:2b:b0:11:22:33", "192.168.1.40": "3c:22:fb:aa:bb:cc"}
+
+
+def test_windows_unprivileged_flag(monkeypatch):
+    import subprocess
+
+    from agentwatch.scanners import nmap
+
+    calls = {}
+
+    def fake_run(cmd, **kw):
+        calls["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout="<nmaprun/>", stderr="")
+
+    monkeypatch.setattr(nmap, "IS_WINDOWS", True)
+    monkeypatch.setattr(nmap, "is_root", lambda: False)
+    monkeypatch.setattr(nmap, "find_nmap", lambda p: "nmap.exe")
+    monkeypatch.setattr(nmap.subprocess, "run", fake_run)
+    nmap.run_nmap(["-sn", "192.168.1.0/24"])
+    assert calls["cmd"][:2] == ["nmap.exe", "--unprivileged"]

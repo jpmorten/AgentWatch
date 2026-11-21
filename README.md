@@ -54,7 +54,32 @@ pip install -e ".[all]"
 agentwatch init            # skriver ~/.agentwatch/config.yaml med dit /24-netværk
 ```
 
-Ret `~/.agentwatch/config.yaml`, især `networks` og `dns` (se
+## Installation (Windows)
+
+**Mulighed 1: færdig AgentWatch.exe (nemmest)**
+1. Installer nmap med Npcap: `winget install Insecure.Nmap` (eller hent installeren fra nmap.org).
+2. Hent `AgentWatch-windows` under *Actions* → seneste grønne *CI*-kørsel → *Artifacts* og pak den ud.
+3. Dobbeltklik `AgentWatch.exe`. Første gang laves config med dit netværk, og GUI'en åbner i browseren.
+   Til den fulde scanning (OS-detektion, UDP): højreklik → *Kør som administrator*.
+
+**Mulighed 2: installer fra kildekoden**
+```powershell
+git clone https://github.com/jpmorten/AgentWatch.git; cd AgentWatch
+.\windows\install.bat        # eller: powershell -ExecutionPolicy Bypass -File windows\install.ps1
+```
+Scriptet installerer Python og nmap via winget, hvis de mangler, laver et virtuelt miljø i
+`%LOCALAPPDATA%\AgentWatch` og lægger to genveje på skrivebordet: *AgentWatch* og
+*AgentWatch (administrator)*.
+
+Windows-noter:
+- Tillad Python/AgentWatch på *Private netværk*, når Windows Firewall spørger. Ellers virker mDNS/SSDP-discovery ikke.
+- Uden administrator kører nmap i `--unprivileged`-mode (TCP connect, ingen OS-detektion). GUI'en viser det.
+- SmartScreen advarer, fordi exe-filen ikke er kodesigneret: *Flere oplysninger* → *Kør alligevel*.
+- AdGuard Home til DNS-logs kører også direkte på Windows (se [docs/dns-logs.md](docs/dns-logs.md)).
+
+## Konfiguration
+
+Ret `~/.agentwatch/config.yaml` (Windows: `%USERPROFILE%\.agentwatch\config.yaml`), især `networks` og `dns` (se
 [docs/dns-logs.md](docs/dns-logs.md)).
 
 ## Brug

@@ -88,7 +88,7 @@ CATALOG: dict[str, tuple[str, list[str]]] = {
 def load_catalog(extra_path: str | Path | None = None) -> dict[str, tuple[str, list[str]]]:
     cat = dict(CATALOG)
     if extra_path and Path(extra_path).exists():
-        for app, spec in (yaml.safe_load(Path(extra_path).read_text()) or {}).items():
+        for app, spec in (yaml.safe_load(Path(extra_path).read_text(encoding="utf-8")) or {}).items():
             cat[app] = (spec["category"], list(spec["domains"]))
     return cat
 

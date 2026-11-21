@@ -17,6 +17,8 @@
     <button {% if scan.running %}disabled{% endif %}>{% if scan.running %}Scanner…{% else %}Start scanning{% endif %}</button>
     <span class="muted">Sidste kørsel: {% if last_run %}{{ last_run.started.strftime("%Y-%m-%d %H:%M") }} UTC, {{ last_run.devices_found }} enheder{% if last_run.errors %}, <span style="color:var(--bad)">{{ last_run.errors|length }} fejl</span>{% endif %}{% else %}aldrig{% endif %}</span>
   </form>
+  {% if not env.nmap_ok %}<p style="color:var(--bad);margin:10px 0 0">nmap blev ikke fundet – {{ env.nmap_hint }}</p>{% endif %}
+  {% if not env.admin %}<p class="muted" style="margin:8px 0 0">Kører uden administrator/root: OS-detektion og UDP-scanning er slået fra. Start AgentWatch som administrator for den fulde profil.</p>{% endif %}
   <pre id="log" class="mono muted" style="margin-top:10px">{{ scan.log[-8:]|join("\n") }}</pre>
 </div>
 <div class="card">

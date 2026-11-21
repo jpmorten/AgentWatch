@@ -6,12 +6,21 @@ import ipaddress
 import json
 import logging
 import socket
+import sys
 from pathlib import Path
 
 import typer
 
 from .config import Config, load_config
 from .store import Store, dumps
+
+if sys.platform == "win32":
+    # Windows-konsollen bruger ellers en gammel tegntabel (æøå, pile m.m.)
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:
+            pass
 
 app = typer.Typer(help="AgentWatch – kortlæg dit netværk til sårbarhedsvurdering.", no_args_is_help=True)
 ConfigOpt = typer.Option(None, "--config", "-c", help="Sti til agentwatch.yaml")
@@ -43,9 +52,9 @@ def init(path: Path = typer.Option(Path("~/.agentwatch/config.yaml"), help="Hvor
         raise typer.Exit(1)
     p.parent.mkdir(parents=True, exist_ok=True)
     example = Path(__file__).parent / "config_example.yaml"
-    text = example.read_text() if example.exists() else "networks:\n  - 192.168.1.0/24\n"
+    text = example.read_text(encoding="utf-8") if example.exists() else "networks:\n  - 192.168.1.0/24\n"
     text = text.replace("192.168.1.0/24", guess_local_network(), 1)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
     typer.echo(f"Skrev {p} – tjek 'networks' og DNS-sektionen.")
 
 
@@ -68,7 +77,8 @@ def scan(config: str = ConfigOpt,
 
 
 @app.command()
-def gui(config: str = ConfigOpt, host: str = "127.0.0.1", port: int = 8765):
+def gui(config: str = ConfigOpt, host: str = "127.0.0.1", port: int = 8765,
+        open_browser: bool = typer.Option(False, "--open", help="Åbn browseren automatisk")):
     """Start web-GUI'en (http://127.0.0.1:8765)."""
     import uvicorn
 
@@ -77,6 +87,11 @@ def gui(config: str = ConfigOpt, host: str = "127.0.0.1", port: int = 8765):
     cfg, store = _ctx(config)
     if host not in ("127.0.0.1", "localhost", "::1"):
         typer.secho("Advarsel: GUI'en har ingen login – eksponér den ikke på netværket.", fg="yellow")
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://{host}:{port}/")).start()
     uvicorn.run(create_app(cfg, store), host=host, port=port, log_level="warning")
 
 
@@ -111,7 +126,7 @@ def export(config: str = ConfigOpt, fmt: str = typer.Option("summary", "--format
         raise typer.BadParameter(f"Ukendt format {fmt}")
     body = dumps(FORMATS[fmt](store.inventory(cfg.networks)))
     if out:
-        out.write_text(body)
+        out.write_text(body, encoding="utf-8")
         typer.echo(f"Skrev {out}")
     else:
         typer.echo(body)
@@ -148,5 +163,22 @@ def dns_unknown(config: str = ConfigOpt, top: int = 40):
         typer.echo(f"{n:7}  {dom}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Indgang for `python -m agentwatch` og AgentWatch.exe.
+
+    Uden argumenter (fx dobbeltklik på AgentWatch.exe) oprettes config ved første
+    start, og GUI'en åbnes i browseren.
+    """
+    if len(sys.argv) == 1:
+        cfg_path = Path("~/.agentwatch/config.yaml").expanduser()
+        if not cfg_path.exists():
+            try:
+                init(cfg_path)
+            except typer.Exit:
+                pass
+        sys.argv += ["gui", "--open"]
     app()
+
+
+if __name__ == "__main__":
+    main()

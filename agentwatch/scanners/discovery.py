@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import sys
 
 from ..store import Store, normalize_mac
 from .nmap import is_root, parse_nmap_xml, run_nmap
@@ -11,12 +12,14 @@ from .nmap import is_root, parse_nmap_xml, run_nmap
 # macOS: "? (192.168.1.1) at a4:2b:b0:1:2:3 on en0 ifscope [ethernet]"
 # Linux: "? (192.168.1.1) at a4:2b:b0:01:02:03 [ether] on eth0"
 ARP_RE = re.compile(r"\((?P<ip>[\d.]+)\) at (?P<mac>[0-9a-fA-F:]+)")
+# Windows: "  192.168.1.1          a4-2b-b0-11-22-33     dynamic"
+WIN_ARP_RE = re.compile(r"^\s*(?P<ip>\d+\.\d+\.\d+\.\d+)\s+(?P<mac>(?:[0-9a-fA-F]{2}-){5}[0-9a-fA-F]{2})\s+\S+")
 
 
 def parse_arp(output: str) -> dict[str, str]:
     result = {}
     for line in output.splitlines():
-        m = ARP_RE.search(line)
+        m = ARP_RE.search(line) or WIN_ARP_RE.search(line)
         if not m or "incomplete" in line:
             continue
         mac = normalize_mac(m.group("mac"))
@@ -28,7 +31,8 @@ def parse_arp(output: str) -> dict[str, str]:
 
 def read_arp_table() -> dict[str, str]:
     try:
-        out = subprocess.run(["arp", "-an"], capture_output=True, text=True, timeout=15).stdout
+        cmd = ["arp", "-a"] if sys.platform == "win32" else ["arp", "-an"]
+        out = subprocess.run(cmd, capture_output=True, text=True, errors="ignore", timeout=15).stdout
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {}
     return parse_arp(out)

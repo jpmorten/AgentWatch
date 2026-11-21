@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[all]"
+      - run: python -m pytest -q
+      - name: CLI smoke test
+        shell: bash
+        run: |
+          printf 'networks: [192.168.1.0/24]\ndb_path: ./ci.db\n' > ci.yaml
+          agentwatch --help
+          agentwatch export -c ci.yaml -f cyclonedx -o ci.cdx.json
+          python -c "import json; assert json.load(open('ci.cdx.json'))['bomFormat']=='CycloneDX'"
+
+  windows-exe:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build AgentWatch.exe
+        shell: pwsh
+        run: ./windows/build_exe.ps1
+      - name: Smoke test exe
+        shell: pwsh
+        run: |
+          "networks: [192.168.1.0/24]`ndb_path: ./exe.db" | Set-Content exe.yaml
+          ./dist/AgentWatch.exe --help
+          ./dist/AgentWatch.exe export -c exe.yaml -f summary -o exe.json
+          if (-not (Test-Path exe.json)) { throw "export failed" }
+          # GUI starter og svarer
+          $p = Start-Process ./dist/AgentWatch.exe -ArgumentList "gui","-c","exe.yaml","--port","8799" -PassThru
+          Start-Sleep -Seconds 8
+          $r = Invoke-WebRequest http://127.0.0.1:8799/ -UseBasicParsing
+          Stop-Process $p -Force
+          if ($r.StatusCode -ne 200) { throw "GUI svarede ikke" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AgentWatch-windows
+          path: |
+            dist/AgentWatch.exe
+            windows/README-windows.txt
+
+  windows-installer:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run install.ps1
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File windows\install.ps1 -SkipNmap -NoShortcuts
+      - name: Verify installation
+        shell: powershell
+        run: |
+          $aw = Join-Path $env:LOCALAPPDATA "AgentWatch\venv\Scripts\agentwatch.exe"
+          & $aw --help
+          if (-not (Test-Path "$env:USERPROFILE\.agentwatch\config.yaml")) { throw "config mangler" }
+          Get-Content "$env:USERPROFILE\.agentwatch\config.yaml" -Encoding UTF8 | Select-Object -First 8
+          & $aw devices

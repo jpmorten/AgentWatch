@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 
@@ -29,16 +30,59 @@ class NmapHost:
     device_type: str | None = None
 
 
+IS_WINDOWS = sys.platform == "win32"
+
+# Standard-installationssteder for nmap på Windows (nmap.org-installeren)
+WINDOWS_NMAP_PATHS = [
+    r"C:\Program Files (x86)\Nmap\nmap.exe",
+    r"C:\Program Files\Nmap\nmap.exe",
+]
+
+
 def is_root() -> bool:
+    """Root på macOS/Linux, administrator på Windows (giver raw sockets via Npcap)."""
+    if IS_WINDOWS:
+        try:
+            import ctypes
+
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+        except Exception:
+            return False
     return hasattr(os, "geteuid") and os.geteuid() == 0
 
 
+def find_nmap(nmap_path: str = "nmap") -> str | None:
+    found = shutil.which(nmap_path)
+    if found:
+        return found
+    if os.path.isfile(nmap_path):
+        return nmap_path
+    if IS_WINDOWS:
+        return next((p for p in WINDOWS_NMAP_PATHS if os.path.isfile(p)), None)
+    return None
+
+
+def install_hint() -> str:
+    if IS_WINDOWS:
+        return "Installer med: winget install Insecure.Nmap  (eller hent installeren fra nmap.org)"
+    if sys.platform == "darwin":
+        return "Installer med: brew install nmap"
+    return "Installer med: sudo apt install nmap"
+
+
 def run_nmap(args: list[str], nmap_path: str = "nmap", timeout: int = 1800) -> str:
-    exe = shutil.which(nmap_path) or nmap_path
-    if not shutil.which(exe):
-        raise NmapError("nmap blev ikke fundet. Installer med: brew install nmap")
+    exe = find_nmap(nmap_path)
+    if not exe:
+        raise NmapError(f"nmap blev ikke fundet. {install_hint()}")
     cmd = [exe, "-oX", "-", *args]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    if IS_WINDOWS and not is_root() and "--unprivileged" not in args:
+        # Uden administrator kan nmap på Windows ikke bruge raw sockets (Npcap) – brug TCP connect
+        cmd.insert(1, "--unprivileged")
+    kwargs = {}
+    if IS_WINDOWS:
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # intet konsolvindue fra GUI'en
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=timeout, **kwargs)
     if proc.returncode != 0 and not proc.stdout.strip():
         raise NmapError(proc.stderr.strip() or f"nmap fejlede: {' '.join(cmd)}")
     return proc.stdout

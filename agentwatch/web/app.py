@@ -46,7 +46,10 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
         return await call_next(request)
 
     def render(request: Request, name: str, **ctx):
-        return TEMPLATES.TemplateResponse(request, name, {"cfg": cfg, "scan": state, **ctx})
+        from ..scanners.nmap import find_nmap, install_hint, is_root
+
+        env = {"admin": is_root(), "nmap_ok": bool(find_nmap(cfg.nmap_path)), "nmap_hint": install_hint()}
+        return TEMPLATES.TemplateResponse(request, name, {"cfg": cfg, "scan": state, "env": env, **ctx})
 
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request, q: str = "", show: str = "online"):

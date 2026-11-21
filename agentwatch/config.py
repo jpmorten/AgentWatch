@@ -24,7 +24,7 @@ class Config(BaseModel):
     networks: list[str] = Field(default_factory=lambda: ["192.168.1.0/24"])
     db_path: str = "~/.agentwatch/agentwatch.db"
     nmap_path: str = "nmap"
-    # "quick": top 200 porte; "full": top 1000 + OS-detektion (kræver sudo)
+    # "quick": top 200 porte; "full": top 1000 + OS-detektion (kræver sudo / administrator)
     service_profile: Literal["quick", "full"] = "quick"
     extra_web_ports: list[int] = Field(default_factory=lambda: [8008, 8009, 8443, 8888, 32400, 5000, 5001, 9000])
     http_timeout: float = 5.0
@@ -43,7 +43,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
             continue
         p = Path(os.path.expanduser(str(c)))
         if p.exists():
-            return Config.model_validate(yaml.safe_load(p.read_text()) or {})
+            return Config.model_validate(yaml.safe_load(p.read_text(encoding="utf-8")) or {})
     if path:
         raise FileNotFoundError(path)
     return Config()

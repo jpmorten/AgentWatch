@@ -7,8 +7,8 @@ networks:
 db_path: ~/.agentwatch/agentwatch.db
 nmap_path: nmap
 
-# quick: top 200 TCP-porte (hurtigt, ingen sudo)
-# full:  TCP 1-10000 + udvalgte UDP-porte + OS-detektion (kør med sudo)
+# quick: top 200 TCP-porte (hurtigt, ingen sudo/admin)
+# full:  TCP 1-10000 + udvalgte UDP-porte + OS-detektion (kør med sudo / som administrator)
 service_profile: quick
 
 # Porte der også testes som webinterfaces (Chromecast, Plex, Synology, ...)
