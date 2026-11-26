@@ -17,6 +17,11 @@ from .models import AppUsage, Device, Inventory, ScanRun, Service, WebApp, utcno
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cve_cache (key TEXT PRIMARY KEY, fetched TEXT NOT NULL, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cve_findings (
+  device_id TEXT NOT NULL, cve_id TEXT NOT NULL, cpe TEXT NOT NULL, data TEXT NOT NULL,
+  PRIMARY KEY (device_id, cve_id, cpe)
+);
 CREATE TABLE IF NOT EXISTS changes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL, device_id TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL
@@ -222,6 +227,50 @@ class Store:
                 d.online = False
                 self.save(d)
 
+    # ---------- CVE ----------
+    @locked
+    def cve_cache_get(self, key: str, max_age):
+        row = self._conn.execute("SELECT fetched, data FROM cve_cache WHERE key=?", (key,)).fetchone()
+        if not row or datetime.fromisoformat(row[0]) < utcnow() - max_age:
+            return None
+        return json.loads(row[1])
+
+    @locked
+    def cve_cache_put(self, key: str, data) -> None:
+        with self.tx() as c:
+            c.execute("INSERT INTO cve_cache(key, fetched, data) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                      "fetched=excluded.fetched, data=excluded.data", (key, utcnow().isoformat(), json.dumps(data)))
+
+    @locked
+    def cve_findings(self, device_id: str | None = None):
+        from .cve import CveFinding
+
+        q, args = "SELECT data FROM cve_findings", ()
+        if device_id:
+            q, args = q + " WHERE device_id=?", (device_id,)
+        rows = self._conn.execute(q, args).fetchall()
+        return sorted((CveFinding.model_validate_json(r[0]) for r in rows), key=lambda f: -f.priority)
+
+    @locked
+    def cve_findings_save(self, findings) -> None:
+        with self.tx() as c:
+            c.executemany(
+                "INSERT INTO cve_findings(device_id, cve_id, cpe, data) VALUES(?,?,?,?) "
+                "ON CONFLICT(device_id, cve_id, cpe) DO UPDATE SET data=excluded.data",
+                [(f.device_id, f.cve_id, f.cpe, f.model_dump_json()) for f in findings])
+
+    @locked
+    def cve_set_status(self, device_id: str, cve_id: str, status: str) -> int:
+        n = 0
+        for f in self.cve_findings(device_id):
+            if f.cve_id == cve_id:
+                f.status = status
+                self.cve_findings_save([f])
+                n += 1
+        if n:
+            self.log_change(device_id, f"cve_{status}", cve_id)
+        return n
+
     # ---------- runs ----------
     @locked
     def save_run(self, run: ScanRun) -> ScanRun:
@@ -244,8 +293,10 @@ class Store:
 
     @locked
     def inventory(self, networks: list[str]) -> Inventory:
+        vulns = [f.model_dump(mode="json") for f in self.cve_findings() if f.status in ("open", "acknowledged")]
         return Inventory(
-            schema_version=SCHEMA_VERSION, networks=networks, devices=self.all(), last_run=self.last_run()
+            schema_version=SCHEMA_VERSION, networks=networks, devices=self.all(), last_run=self.last_run(),
+            vulnerabilities=vulns,
         )
 
 

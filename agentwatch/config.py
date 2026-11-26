@@ -20,6 +20,20 @@ class DnsSource(BaseModel):
     hours: int = 24
 
 
+class CveConfig(BaseModel):
+    """CVE-vagt. Se docs/cve-vagt.md."""
+
+    enabled: bool = True  # baggrundstjek mens GUI'en kører
+    interval_hours: float = 12
+    cache_hours: float = 24  # NVD-svar pr. CPE genbruges så længe
+    min_cvss: float = 7.0  # notificér ved nye fund med mindst denne score ...
+    alert_on_kev: bool = True  # ... eller som er på CISA's KEV-liste (aktivt udnyttet)
+    nvd_api_key_env: str = "NVD_API_KEY"
+    ntfy_server: str = "https://ntfy.sh"
+    ntfy_topic: str | None = None  # push til telefon via ntfy-appen
+    webhook_url: str | None = None  # Discord/Slack/Teams/egen
+
+
 class Config(BaseModel):
     networks: list[str] = Field(default_factory=lambda: ["192.168.1.0/24"])
     db_path: str = "~/.agentwatch/agentwatch.db"
@@ -30,6 +44,7 @@ class Config(BaseModel):
     http_timeout: float = 5.0
     dns: DnsSource = Field(default_factory=DnsSource)
     analyst_model: str = "claude-opus-5-5"
+    cve: CveConfig = Field(default_factory=CveConfig)
 
     @property
     def db_file(self) -> Path:

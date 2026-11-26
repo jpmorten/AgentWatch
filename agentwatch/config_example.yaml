@@ -26,3 +26,13 @@ dns:
 
 # Model til `agentwatch analyze`
 analyst_model: claude-opus-5-5
+
+# CVE-vagt: matcher software/firmware mod NVD, CISA KEV og EPSS. Se docs/cve-vagt.md.
+cve:
+  enabled: true          # tjek automatisk mens GUI'en kører
+  interval_hours: 12
+  min_cvss: 7.0          # notificér ved nye fund med CVSS >= denne ...
+  alert_on_kev: true     # ... eller som aktivt udnyttes (CISA KEV)
+  nvd_api_key_env: NVD_API_KEY   # valgfri gratis nøgle = meget hurtigere tjek
+  # ntfy_topic: agentwatch-hjemme-8f3k2   # push til telefonen via ntfy-appen (vælg et svært gætteligt navn)
+  # webhook_url: https://discord.com/api/webhooks/...

@@ -29,7 +29,7 @@
     <div><label>Version</label><input name="version" value="{{ d.firmware.version if d.firmware and d.firmware.version else '' }}" placeholder="fx 3.0.0.4.388_24198"></div>
     <div><label>Producent</label><input name="vendor" value="{{ d.firmware.vendor if d.firmware and d.firmware.vendor else (d.vendor or '') }}"></div>
     <div><label>Model</label><input name="model" value="{{ d.firmware.model if d.firmware and d.firmware.model else (d.model or '') }}"></div>
-    <div><label>CPE (valgfri)</label><input name="cpe" value="{{ d.firmware.cpe if d.firmware and d.firmware.cpe else '' }}" placeholder="cpe:2.3:o:asus:rt-ax88u_firmware:…"></div>
+    <div><label>CPE (valgfri – kræves til CVE-vagt) <a href="#" id="cpefind">find CPE</a></label><input name="cpe" id="cpeinput" list="cpelist" value="{{ d.firmware.cpe if d.firmware and d.firmware.cpe else '' }}" placeholder="cpe:2.3:o:asus:rt-ax88u_firmware:…"><datalist id="cpelist"></datalist><div id="cpehits" class="muted" style="font-size:12px"></div></div>
     <div style="align-self:end"><button>Gem firmware</button></div>
   </form>
 </div>
@@ -76,6 +76,20 @@
   </form>
 </div>
 
+<div class="card scroll" id="cves">
+  <h2>Sårbarheder (CVE) <span class="muted" style="font-weight:400">– {{ cves|selectattr("status","equalto","open")|list|length }} åbne · <a href="/cves">CVE-vagt</a></span></h2>
+  <table><tr><th>CVE</th><th>CVSS</th><th>Udnyttelse</th><th>Komponent</th><th>Status</th><th></th></tr>
+  {% set status = "all" %}{% set back_url = "/device?id=" ~ (d.id|urlencode) ~ "#cves" %}
+  {% for f in cves[:200] %}<tr>
+    <td class="mono"><a href="https://nvd.nist.gov/vuln/detail/{{ f.cve_id }}" target="_blank" rel="noopener noreferrer">{{ f.cve_id }}</a></td>
+    <td><span class="pill {% if (f.cvss or 0) >= 9 %}bad{% elif (f.cvss or 0) >= 7 %}warn{% endif %}">{{ f.cvss or "?" }}</span></td>
+    <td>{% if f.kev %}<span class="pill bad">KEV</span>{% endif %}{% if f.epss is not none %} <span class="muted">EPSS {{ "%.1f"|format(f.epss*100) }}%</span>{% endif %}</td>
+    <td>{{ f.product or "" }} {{ f.version or "" }} <span class="muted">{{ f.where }}</span>{% if f.confidence == "lav" %} <span class="pill warn" title="{{ f.confidence_note }}">lav sikkerhed</span>{% endif %}</td>
+    <td><span class="pill">{{ f.status }}</span></td><td style="white-space:nowrap">{% include "_cve_actions.html" %}</td>
+  </tr>{% else %}<tr><td colspan="6" class="muted">Ingen kendte sårbarheder fundet{% if not d.services and not d.firmware %} – ingen software med version at matche{% endif %}. Tilføj firmware-CPE herover for at få firmware med.</td></tr>{% endfor %}
+  </table>
+</div>
+
 <div class="card scroll">
   <h2>Apps / tjenester (fra DNS)</h2>
   <table><tr><th>App</th><th>Kategori</th><th>Opslag</th><th>Sidst set</th><th>Domæner</th></tr>
@@ -100,4 +114,20 @@
 
 <form method="post" action="/device/delete" onsubmit="return confirm('Slet enheden fra inventaret?')">
   <input type="hidden" name="id" value="{{ d.id }}"><button class="danger">Slet enhed</button></form>
+<script>
+document.getElementById('cpefind').addEventListener('click', async e => {
+  e.preventDefault();
+  const f = e.target.closest('form'), q = [f.vendor.value, f.model.value].filter(Boolean).join(' ');
+  const hits = document.getElementById('cpehits'); hits.textContent = 'Søger i NVD efter "' + q + '" …';
+  try {
+    const r = await (await fetch('/cpe/suggest?q=' + encodeURIComponent(q))).json();
+    if (r.error || !r.length) { hits.textContent = r.error ? 'Fejl: ' + r.error : 'Ingen CPE fundet – prøv kortere producent/model.'; return; }
+    hits.innerHTML = '';
+    r.slice(0, 8).forEach(x => { const a = document.createElement('a'); a.href = '#'; a.textContent = x.title || x.cpe;
+      a.title = x.cpe; a.style.display = 'block'; a.onclick = ev => { ev.preventDefault();
+        document.getElementById('cpeinput').value = x.cpe.replace(/:\*:\*:\*:\*:\*:\*:\*$/, ':*:*:*:*:*:*:*'); hits.textContent = 'Valgt: ' + x.cpe; };
+      hits.appendChild(a); });
+  } catch (err) { hits.textContent = 'Fejl: ' + err; }
+});
+</script>
 {% endblock %}

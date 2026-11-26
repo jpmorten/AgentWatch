@@ -5,6 +5,7 @@
   <div class="stat"><div class="n">{{ stats.webapps }}</div><div class="muted">webinterfaces</div></div>
   <div class="stat"><div class="n">{{ stats.no_firmware }}</div><div class="muted">mangler firmware</div></div>
   <div class="stat"><div class="n">{{ stats.unknown_type }}</div><div class="muted">ukendt type</div></div>
+  <a class="stat" href="/cves" style="text-decoration:none;color:inherit{% if stats.cve_kev %};border-color:var(--bad){% endif %}"><div class="n">{{ stats.cve_open }}{% if stats.cve_kev %} <span class="pill bad">{{ stats.cve_kev }} KEV</span>{% endif %}</div><div class="muted">åbne CVE'er{% if stats.cve_crit %} · {{ stats.cve_crit }} kritiske{% endif %}</div></a>
 </div>
 <div class="card" id="log">
   <div class="row">
@@ -25,13 +26,15 @@
     <form method="post" action="/analyze" class="row">
       <button class="secondary runbtn" {% if scan.running %}disabled{% endif %} title="Kræver ANTHROPIC_API_KEY">Analysér med Claude</button>
     </form>
+    <form method="post" action="/cve/check" class="row">
+      <button class="secondary runbtn" {% if scan.running %}disabled{% endif %}>Tjek CVE'er</button>
+    </form>
     <span id="status" class="muted">{% if scan.running %}<span class="spin"></span> {{ scan.task }} kører …{% endif %}</span>
   </div>
   <p class="muted" style="margin:8px 0">Sidste kørsel: {% if last_run %}{{ last_run.started.strftime("%Y-%m-%d %H:%M") }} UTC, {{ last_run.devices_found }} enheder{% if last_run.errors %}, <span style="color:var(--bad)">{{ last_run.errors|length }} fejl: {{ last_run.errors|join(" · ") }}</span>{% endif %}{% else %}aldrig{% endif %}</p>
   {% if not env.nmap_ok %}<p style="color:var(--bad);margin:6px 0">nmap blev ikke fundet – {{ env.nmap_hint }}</p>{% endif %}
   {% if not env.admin %}<p class="muted" style="margin:6px 0">Kører uden administrator/root: OS-detektion og UDP-scanning er slået fra. Start AgentWatch som administrator for den fulde profil.</p>{% endif %}
-  <div class="logbox" id="logbox"></div>
-  <div class="row muted" style="margin-top:6px;font-size:12px"><label style="margin:0"><input type="checkbox" id="follow" checked style="width:auto"> følg automatisk</label> · <a href="/log">hele loggen</a> · <a href="/diag">diagnostik</a></div>
+  {% include "_logpanel.html" %}
 </div>
 <div class="card">
   <form class="row" style="margin-bottom:10px">
@@ -40,7 +43,7 @@
     <button class="secondary">Filtrér</button>
   </form>
   <div class="scroll"><table>
-    <tr><th>IP</th><th>Navn</th><th>Type</th><th>Producent / model</th><th>OS / firmware</th><th>Services</th><th>Apps</th></tr>
+    <tr><th>IP</th><th>Navn</th><th>Type</th><th>Producent / model</th><th>OS / firmware</th><th>Services</th><th>CVE</th><th>Apps</th></tr>
     {% for d in devices %}
     <tr>
       <td class="mono"><a href="/device?id={{ d.id|urlencode }}">{{ d.ip or "—" }}</a>{% if not d.online %} <span class="pill">offline</span>{% endif %}<div class="muted">{{ d.mac or "" }}</div></td>
@@ -49,31 +52,11 @@
       <td>{{ d.vendor or "" }}<div class="muted">{{ d.model or "" }}</div></td>
       <td>{{ d.os or "" }}<div class="muted">{% if d.firmware and d.firmware.version %}fw {{ d.firmware.version }}{% else %}<span class="pill warn">ingen firmware</span>{% endif %}</div></td>
       <td class="mono">{% for s in d.services[:6] %}<span class="pill">{{ s.port }}{% if s.product %} {{ s.product }}{% endif %}</span>{% endfor %}{% if d.services|length > 6 %}<span class="muted">+{{ d.services|length - 6 }}</span>{% endif %}</td>
+      <td>{% set c = cve_by_dev.get(d.id) %}{% if c %}<a href="/device?id={{ d.id|urlencode }}#cves" class="pill {% if c.kev %}bad{% elif c.max >= 7 %}warn{% endif %}" style="text-decoration:none">{{ c.n }}{% if c.kev %} · KEV{% endif %} · max {{ c.max }}</a>{% endif %}</td>
       <td>{% for a in d.apps[:4] %}<span class="pill {% if a.category=='remote-access' %}bad{% elif a.category=='telemetry' %}warn{% endif %}">{{ a.app }}</span>{% endfor %}</td>
     </tr>
-    {% else %}<tr><td colspan="7" class="muted">Ingen enheder endnu – start en scanning eller tilføj manuelt.</td></tr>{% endfor %}
+    {% else %}<tr><td colspan="8" class="muted">Ingen enheder endnu – start en scanning eller tilføj manuelt.</td></tr>{% endfor %}
   </table></div>
 </div>
-<script>
-(()=>{
-  const box=document.getElementById('logbox'), st=document.getElementById('status'), follow=document.getElementById('follow');
-  let seq=0, wasRunning={{ 'true' if scan.running else 'false' }};
-  const cls=l=>/FEJL|ERROR|fejlede|Traceback/i.test(l)?'err':/WARNING|advarsel|afvist/i.test(l)?'warn':/færdig|NY ENHED/.test(l)?'ok':/^\S+ (\[\d+\/\d+\]|=+|Scanning #|Claude)/.test(l)?'hd':'';
-  async function poll(){
-    try{
-      const j=await (await fetch('/scan/status?since='+seq)).json();
-      for(const l of j.lines){const d=document.createElement('div');d.textContent=l;const c=cls(l);if(c)d.className=c;box.appendChild(d)}
-      while(box.childElementCount>1500) box.removeChild(box.firstChild);
-      if(j.lines.length&&follow.checked) box.scrollTop=box.scrollHeight;
-      seq=j.seq;
-      st.innerHTML=j.running?'<span class="spin"></span> '+j.task+' kører …':'';
-      document.querySelectorAll('.runbtn').forEach(b=>b.disabled=j.running);
-      if(wasRunning&&!j.running){st.textContent='Færdig – opdaterer tabellen …';setTimeout(()=>location.reload(),1500)}
-      wasRunning=j.running;
-    }catch(e){st.textContent='Mistede forbindelsen til AgentWatch – kører programmet stadig?'}
-    setTimeout(poll, wasRunning?1000:4000);
-  }
-  poll();
-})();
-</script>
+
 {% endblock %}

@@ -94,6 +94,19 @@ def build_server(cfg: Config, store: Store):
         return store.changes(since=utcnow() - timedelta(hours=hours))
 
     @server.tool()
+    def list_vulnerabilities(min_cvss: float = 0.0, kev_only: bool = False, device_id: str | None = None,
+                             include_low_confidence: bool = True) -> list[dict]:
+        """CVE-fund fra CVE-vagten (NVD + CISA KEV + EPSS), vigtigste først. KEV = aktivt udnyttet."""
+        out = []
+        for f in store.cve_findings(device_id):
+            if f.status not in ("open", "acknowledged") or (f.cvss or 0) < min_cvss or (kev_only and not f.kev):
+                continue
+            if not include_low_confidence and f.confidence == "lav":
+                continue
+            out.append(f.model_dump(mode="json", exclude={"notified"}))
+        return out[:500]
+
+    @server.tool()
     def export_cyclonedx() -> dict:
         """Hele inventaret som CycloneDX 1.6 JSON (til CVE-matchning i fx Dependency-Track/Grype)."""
         return cyclonedx_json(store.inventory(cfg.networks))

@@ -49,6 +49,25 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
         LOG.addHandler(BUFFER)
         LOG.setLevel(logging.DEBUG)
 
+    def cve_watcher():
+        """Kører CVE-vagten med fast interval, mens GUI'en er åben."""
+        import time as _t
+
+        _t.sleep(60)  # lad GUI'en starte først
+        while True:
+            if cfg.cve.enabled and store.all():
+                last = store.cve_cache_get("__last_check__", max_age=__import__("datetime").timedelta(
+                    hours=cfg.cve.interval_hours))
+                if last is None and not state.running:
+                    from ..cve import check_inventory
+
+                    start_background("CVE-tjek", lambda: (check_inventory(store, cfg),
+                                                          store.cve_cache_put("__last_check__", True)))
+            _t.sleep(600)
+
+    if cfg.cve.enabled:
+        threading.Thread(target=cve_watcher, daemon=True, name="agentwatch-cve-watch").start()
+
     @app.exception_handler(Exception)
     async def on_error(request: Request, exc: Exception):
         LOG.error("Fejl i GUI ved %s %s: %s", request.method, request.url.path, exc)
@@ -95,8 +114,18 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
             "no_firmware": sum(1 for d in allv if not (d.firmware and d.firmware.version)),
             "unknown_type": sum(1 for d in allv if not d.device_type),
         }
+        open_cves = [f for f in store.cve_findings() if f.status == "open"]
+        stats["cve_open"] = len(open_cves)
+        stats["cve_kev"] = sum(f.kev for f in open_cves)
+        stats["cve_crit"] = sum((f.cvss or 0) >= 9 for f in open_cves)
+        cve_by_dev = {}
+        for f in open_cves:
+            c = cve_by_dev.setdefault(f.device_id, {"n": 0, "kev": 0, "max": 0.0})
+            c["n"] += 1
+            c["kev"] += f.kev
+            c["max"] = max(c["max"], f.cvss or 0)
         return render(request, "index.html", devices=devs, stats=stats, q=q, show=show,
-                      last_run=store.last_run())
+                      last_run=store.last_run(), cve_by_dev=cve_by_dev)
 
     @app.get("/device", response_class=HTMLResponse)
     def device(request: Request, id: str):
@@ -104,6 +133,7 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
         if not d:
             raise HTTPException(404, "Ukendt enhed")
         return render(request, "device.html", d=d, device_types=DEVICE_TYPES, fields=EDITABLE_FIELDS,
+                      cves=store.cve_findings(d.id),
                       changes=[c for c in store.changes(limit=500) if c["device_id"] == d.id][:30])
 
     @app.post("/device/edit")
@@ -261,6 +291,45 @@ def create_app(cfg: Config, store: Store) -> FastAPI:
     def scan_status(since: int = 0):
         last, lines = BUFFER.since(since)
         return JSONResponse({"running": state.running, "task": state.task, "seq": last, "lines": lines})
+
+    @app.get("/cves", response_class=HTMLResponse)
+    def cves(request: Request, status: str = "open", min_cvss: float = 0.0, kev: bool = False, q: str = ""):
+        allf = store.cve_findings()
+        rows = [f for f in allf if (status == "all" or f.status == status) and (f.cvss or 0) >= min_cvss
+                and (not kev or f.kev) and (not q or q.lower() in (f.cve_id + " " + (f.product or "") + " "
+                                                                     + f.description).lower())]
+        devs = {d.id: d for d in store.all()}
+        last = store.cve_cache_get("__last_check__", max_age=__import__("datetime").timedelta(days=3650))
+        counts = {s_: sum(f.status == s_ for f in allf) for s_ in ("open", "acknowledged", "ignored", "resolved")}
+        return render(request, "cves.html", rows=rows[:1000], devs=devs, status=status, min_cvss=min_cvss,
+                      kev=kev, q=q, counts=counts, has_key=bool(os.environ.get(cfg.cve.nvd_api_key_env)),
+                      last_check=last)
+
+    @app.post("/cve/check")
+    def cve_check():
+        from ..cve import check_inventory
+
+        start_background("CVE-tjek", lambda: (check_inventory(store, cfg),
+                                              store.cve_cache_put("__last_check__", True)))
+        return RedirectResponse("/cves#log", status_code=303)
+
+    @app.post("/cve/status")
+    def cve_status(device_id: str = Form(...), cve_id: str = Form(...), status: str = Form(...),
+                   back: str = Form("/cves")):
+        if status not in ("open", "acknowledged", "ignored"):
+            raise HTTPException(400, "ugyldig status")
+        store.cve_set_status(device_id, cve_id, status)
+        return RedirectResponse(back if back.startswith("/") else "/cves", status_code=303)
+
+    @app.get("/cpe/suggest")
+    def cpe_suggest(q: str):
+        from ..cve import NvdClient
+
+        try:
+            return JSONResponse(NvdClient(os.environ.get(cfg.cve.nvd_api_key_env)).suggest_cpe(q))
+        except Exception as exc:
+            LOG.warning("CPE-søgning fejlede: %s", exc)
+            return JSONResponse({"error": str(exc)}, status_code=502)
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

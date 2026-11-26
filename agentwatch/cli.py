@@ -177,6 +177,95 @@ def dns_unknown(config: str = ConfigOpt, top: int = 40):
         typer.echo(f"{n:7}  {dom}")
 
 
+cve_app = typer.Typer(help="CVE-vagt: match inventaret mod NVD, CISA KEV og EPSS.", no_args_is_help=True)
+app.add_typer(cve_app, name="cve")
+
+
+@cve_app.command("check")
+def cve_check(config: str = ConfigOpt,
+              scan_first: bool = typer.Option(False, "--scan", help="Kør en scanning først"),
+              no_cache: bool = typer.Option(False, "--no-cache", help="Hent alt fra NVD igen"),
+              os_guess: bool = typer.Option(False, "--include-os-guess",
+                                            help="Medtag nmaps OS-gæt (giver mange falske positiver)")):
+    """Tjek alle enheder for kendte sårbarheder og notificér om nye."""
+    from .cve import check_inventory
+
+    cfg, store = _ctx(config)
+    if scan_first:
+        from .orchestrator import run_scan
+
+        run_scan(cfg, store)
+    res = check_inventory(store, cfg, use_cache=not no_cache, include_os_guess=os_guess)
+    if res["kev"]:
+        raise typer.Exit(2)  # nyttigt i scripts: 2 = aktivt udnyttede sårbarheder fundet
+
+
+@cve_app.command("list")
+def cve_list(config: str = ConfigOpt, min_cvss: float = 0.0, kev: bool = typer.Option(False, "--kev"),
+             all_status: bool = typer.Option(False, "--all", help="Medtag løste/ignorerede")):
+    """Vis fund, vigtigste først."""
+    _, store = _ctx(config)
+    names = {d.id: d.hostname or d.model or d.ip for d in store.all()}
+    for f in store.cve_findings():
+        if (not all_status and f.status != "open") or (f.cvss or 0) < min_cvss or (kev and not f.kev):
+            continue
+        typer.echo(f"{f.cve_id:17} CVSS {str(f.cvss or '?'):4} {'KEV ' if f.kev else '    '}"
+                   f"EPSS {f'{f.epss:.0%}' if f.epss is not None else '?':>4}  {f.status:12} "
+                   f"{(names.get(f.device_id) or '')[:20]:20} {f.product or ''} {f.version or ''} "
+                   f"{'(lav sikkerhed)' if f.confidence == 'lav' else ''}")
+
+
+@cve_app.command("set")
+def cve_set(device_id: str, cve_id: str, status: str = typer.Argument(..., help="open | acknowledged | ignored"),
+            config: str = ConfigOpt):
+    """Markér et fund som kendt/ignoreret/åbent."""
+    _, store = _ctx(config)
+    if status not in ("open", "acknowledged", "ignored"):
+        raise typer.BadParameter("status skal være open, acknowledged eller ignored")
+    typer.echo(f"{store.cve_set_status(device_id, cve_id, status)} fund opdateret")
+
+
+@cve_app.command("schedule")
+def cve_schedule(time_of_day: str = typer.Option("07:40", "--time", help="Klokkeslæt (HH:MM)"),
+                 scan: bool = typer.Option(True, help="Scan netværket før CVE-tjekket"),
+                 apply: bool = typer.Option(False, "--apply", help="Opret opgaven (ellers vises kun kommandoen)")):
+    """Kør CVE-vagten dagligt via Windows Opgavestyring / launchd / cron."""
+    import subprocess
+
+    from .cve import scheduled_command
+
+    cmd = scheduled_command("cve check" + (" --scan" if scan else ""))
+    if sys.platform == "win32":
+        args = ["schtasks", "/Create", "/F", "/SC", "DAILY", "/ST", time_of_day, "/TN", "AgentWatch CVE-vagt",
+                "/TR", cmd]
+        typer.echo("Windows Opgavestyring:\n  " + subprocess.list2cmdline(args))
+        typer.echo("Tip: kør i en administrator-PowerShell og tilføj /RL HIGHEST for fuld scanning med OS-detektion.")
+        if apply:
+            r = subprocess.run(args, capture_output=True, text=True, errors="replace")
+            typer.echo(r.stdout or r.stderr)
+    else:
+        hh, mm = time_of_day.split(":")
+        line = f"{int(mm)} {int(hh)} * * * {cmd} >> ~/.agentwatch/cve-cron.log 2>&1"
+        typer.echo("Tilføj denne linje med `crontab -e` (macOS/Linux):\n  " + line)
+        if apply:
+            cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+            if line not in cur:
+                subprocess.run(["crontab", "-"], input=cur + line + "\n", text=True, check=True)
+                typer.echo("Tilføjet til crontab.")
+
+
+@cve_app.command("cpe")
+def cve_cpe(query: str = typer.Argument(..., help="Fx 'asus rt-ax88u' eller 'synology dsm 7.2'")):
+    """Find den rigtige CPE til manuel firmware-indtastning (søger i NVD's CPE-ordbog)."""
+    import os
+
+    from .config import CveConfig
+    from .cve import NvdClient
+
+    for r in NvdClient(os.environ.get(CveConfig().nvd_api_key_env)).suggest_cpe(query):
+        typer.echo(f"{r['cpe']}\n    {r['title']}")
+
+
 def main() -> None:
     """Indgang for `python -m agentwatch` og AgentWatch.exe.
 

@@ -44,6 +44,13 @@ en whitelist af informationsindsamlende nmap-scripts (ingen brute force,
 ingen exploits). GUI'en lytter kun på 127.0.0.1 og afviser POST-requests fra
 andre sider (CSRF).
 
+## CVE-vagt
+
+AgentWatch matcher løbende software og firmware mod **NVD**, **CISA KEV** (aktivt udnyttede
+sårbarheder) og **EPSS** (sandsynlighed for udnyttelse). Nye fund vises i GUI'en (fanen *CVE-vagt*),
+logges, og kan sendes som push-besked (ntfy) eller webhook. Kør `agentwatch cve check`, eller sæt en
+daglig kørsel op med `agentwatch cve schedule --apply`. Se [docs/cve-vagt.md](docs/cve-vagt.md).
+
 ## Installation (macOS)
 
 ```bash

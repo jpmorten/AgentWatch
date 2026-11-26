@@ -116,3 +116,5 @@ class Inventory(BaseModel):
     networks: list[str] = Field(default_factory=list)
     devices: list[Device] = Field(default_factory=list)
     last_run: ScanRun | None = None
+    # CVE-fund (åbne + kendte) fra CVE-vagten; se agentwatch/cve.py
+    vulnerabilities: list[dict] = Field(default_factory=list)

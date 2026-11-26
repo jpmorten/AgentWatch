@@ -45,6 +45,7 @@ const channel = process.argv[3];
     await p.click('text=Slet enhed'); await p.waitForURL(B + '/'); });
   await step('ændringer', () => p.goto(B + '/changes'));
   await step('log-side', async () => { await p.goto(B + '/log'); await p.waitForSelector('text=/Scanning #/'); });
+  await step('cve-vagt-side', async () => { await p.goto(B + '/cves'); await p.waitForSelector('text=Tjek nu'); });
   await step('diagnostik', async () => { await p.goto(B + '/diag'); await p.waitForSelector('text=nmap-version'); });
   for (const f of ['summary', 'inventory', 'cyclonedx'])
     await step('eksport ' + f, async () => { const r = await p.request.get(B + '/export/' + f);

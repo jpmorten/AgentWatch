@@ -1,0 +1,24 @@
+<div class="logbox" id="logbox"></div>
+<div class="row muted" style="margin-top:6px;font-size:12px"><label style="margin:0"><input type="checkbox" id="follow" checked style="width:auto"> følg automatisk</label> · <a href="/log">hele loggen</a> · <a href="/diag">diagnostik</a></div>
+<script>
+(()=>{
+  const box=document.getElementById('logbox'), st=document.getElementById('status')||document.createElement('span'), follow=document.getElementById('follow');
+  let seq=0, wasRunning={{ 'true' if scan.running else 'false' }};
+  const cls=l=>/FEJL|ERROR|fejlede|Traceback/i.test(l)?'err':/WARNING|advarsel|afvist/i.test(l)?'warn':/færdig|NY ENHED/.test(l)?'ok':/^\S+ (\[\d+\/\d+\]|=+|Scanning #|Claude)/.test(l)?'hd':'';
+  async function poll(){
+    try{
+      const j=await (await fetch('/scan/status?since='+seq)).json();
+      for(const l of j.lines){const d=document.createElement('div');d.textContent=l;const c=cls(l);if(c)d.className=c;box.appendChild(d)}
+      while(box.childElementCount>1500) box.removeChild(box.firstChild);
+      if(j.lines.length&&follow.checked) box.scrollTop=box.scrollHeight;
+      seq=j.seq;
+      st.innerHTML=j.running?'<span class="spin"></span> '+j.task+' kører …':'';
+      document.querySelectorAll('.runbtn').forEach(b=>b.disabled=j.running);
+      if(wasRunning&&!j.running){st.textContent='Færdig – opdaterer tabellen …';setTimeout(()=>location.reload(),1500)}
+      wasRunning=j.running;
+    }catch(e){st.textContent='Mistede forbindelsen til AgentWatch – kører programmet stadig?'}
+    setTimeout(poll, wasRunning?1000:4000);
+  }
+  poll();
+})();
+</script>

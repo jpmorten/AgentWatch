@@ -1,0 +1,44 @@
+{% extends "base.html" %}{% block body %}
+<h1>CVE-vagt</h1>
+<div class="card" id="log">
+  <div class="row">
+    <form method="post" action="/cve/check"><button class="runbtn" {% if scan.running %}disabled{% endif %}>Tjek nu</button></form>
+    <span id="status" class="muted">{% if scan.running %}<span class="spin"></span> {{ scan.task }} kører …{% endif %}</span>
+    <span class="muted">Automatisk tjek: {% if cfg.cve.enabled %}hver {{ cfg.cve.interval_hours|round|int }}. time mens AgentWatch kører{% else %}slået fra{% endif %}
+      · notifikation: {% if cfg.cve.ntfy_topic or cfg.cve.webhook_url %}{{ "ntfy" if cfg.cve.ntfy_topic else "" }} {{ "webhook" if cfg.cve.webhook_url else "" }}{% else %}ingen (se docs/cve-vagt.md){% endif %}
+      · NVD-nøgle: {{ "ja" if has_key else "nej (langsommere)" }}</span>
+  </div>
+  <p class="muted" style="margin:8px 0">Kilder: NVD (CVE + CVSS), CISA KEV (aktivt udnyttet), FIRST EPSS (sandsynlighed for udnyttelse inden for 30 dage). Kun software/firmware med kendt version matches. Fund på Linux-distropakker har <b>lav sikkerhed</b>, fordi rettelser ofte backportes uden versionsskift.</p>
+  {% include "_logpanel.html" %}
+</div>
+<div class="card">
+  <form class="row" style="margin-bottom:10px">
+    <select name="status" style="width:auto">
+      {% for s_, label in [("open","Åbne"),("acknowledged","Kendte"),("ignored","Ignorerede"),("resolved","Løste"),("all","Alle")] %}
+      <option value="{{ s_ }}" {% if status==s_ %}selected{% endif %}>{{ label }}{% if s_ != "all" %} ({{ counts[s_] }}){% endif %}</option>{% endfor %}
+    </select>
+    <select name="min_cvss" style="width:auto">
+      {% for v, label in [(0,"Alle scorer"),(4,"CVSS ≥ 4"),(7,"CVSS ≥ 7 (høj)"),(9,"CVSS ≥ 9 (kritisk)")] %}
+      <option value="{{ v }}" {% if min_cvss==v %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <label style="margin:0;display:flex;gap:4px;align-items:center"><input type="checkbox" name="kev" value="true" {% if kev %}checked{% endif %} style="width:auto"> kun KEV</label>
+    <input name="q" value="{{ q }}" placeholder="Søg CVE, produkt, beskrivelse" style="max-width:260px">
+    <button class="secondary">Filtrér</button>
+  </form>
+  <div class="scroll"><table>
+    <tr><th>CVE</th><th>CVSS</th><th>Udnyttelse</th><th>Enhed</th><th>Komponent</th><th>Beskrivelse</th><th></th></tr>
+    {% for f in rows %}{% set d = devs.get(f.device_id) %}
+    <tr>
+      <td class="mono"><a href="https://nvd.nist.gov/vuln/detail/{{ f.cve_id }}" target="_blank" rel="noopener noreferrer">{{ f.cve_id }}</a><div class="muted">{{ f.published or "" }}</div></td>
+      <td><span class="pill {% if (f.cvss or 0) >= 9 %}bad{% elif (f.cvss or 0) >= 7 %}warn{% endif %}">{{ f.cvss or "?" }}</span><div class="muted" style="font-size:11px">{{ f.severity or "" }}</div></td>
+      <td>{% if f.kev %}<span class="pill bad" title="CISA KEV – frist {{ f.kev_due }}">KEV{% if f.kev_ransomware %} · ransomware{% endif %}</span>{% endif %}
+          {% if f.epss is not none %}<div class="muted" style="font-size:12px">EPSS {{ "%.1f"|format(f.epss*100) }}%</div>{% endif %}</td>
+      <td>{% if d %}<a href="/device?id={{ d.id|urlencode }}#cves">{{ d.hostname or d.model or d.ip }}</a><div class="muted mono">{{ d.ip }}</div>{% else %}<span class="muted">{{ f.device_id }}</span>{% endif %}</td>
+      <td>{{ f.product or "" }} {{ f.version or "" }}<div class="muted">{{ f.where or "" }}</div>{% if f.confidence == "lav" %}<span class="pill warn" title="{{ f.confidence_note }}">lav sikkerhed</span>{% endif %}</td>
+      <td style="max-width:420px;font-size:12.5px">{{ f.description[:260] }}{% if f.description|length > 260 %}…{% endif %}</td>
+      <td style="white-space:nowrap">{% include "_cve_actions.html" %}</td>
+    </tr>
+    {% else %}<tr><td colspan="7" class="muted">Ingen fund med disse filtre.{% if not counts.open and not counts.resolved %} Klik "Tjek nu" for at køre CVE-vagten.{% endif %}</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

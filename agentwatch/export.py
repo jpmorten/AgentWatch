@@ -20,6 +20,9 @@ def inventory_json(inv: Inventory) -> dict:
 
 def summary_json(inv: Inventory) -> dict:
     devices = []
+    vulns_by_dev: dict[str, list[dict]] = {}
+    for v in inv.vulnerabilities:
+        vulns_by_dev.setdefault(v["device_id"], []).append(v)
     for d in inv.devices:
         devices.append({
             "id": d.id, "ip": d.ip, "name": d.hostname, "vendor": d.vendor, "type": d.device_type,
@@ -35,6 +38,11 @@ def summary_json(inv: Inventory) -> dict:
                                            "(login)" if w.auth_required else None]))
                     for w in d.webapps],
             "apps": [f"{a.app} ({a.category}, {a.query_count} opslag)" for a in d.apps[:15]],
+            "vulnerabilities": [
+                {"cve": v["cve_id"], "cvss": v["cvss"], "kev": v["kev"], "epss": v["epss"],
+                 "component": f"{v.get('product') or ''} {v.get('version') or ''} ({v.get('where')})".strip(),
+                 "confidence": v["confidence"], "status": v["status"]}
+                for v in vulns_by_dev.get(d.id, [])[:30]],
         })
     return {"schema_version": SCHEMA_VERSION, "generated": inv.generated.isoformat(),
             "networks": inv.networks, "device_count": len(devices), "devices": devices}
@@ -100,7 +108,30 @@ def cyclonedx_json(inv: Inventory) -> dict:
             "properties": _props(networks=",".join(inv.networks)),
         },
         "components": [_device_component(d) for d in inv.devices],
+        "vulnerabilities": [_vuln(v) for v in inv.vulnerabilities],
     }
+
+
+def _vuln(v: dict) -> dict:
+    ref = f"{v['device_id']}/firmware" if v.get("where") == "firmware" else (
+        f"{v['device_id']}/os" if v.get("where") == "os" else
+        f"{v['device_id']}/svc/{(v.get('where') or '0/tcp').split('/')[1]}/{(v.get('where') or '0/tcp').split('/')[0]}")
+    out = {
+        "bom-ref": f"{v['cve_id']}@{ref}", "id": v["cve_id"],
+        "source": {"name": "NVD", "url": f"https://nvd.nist.gov/vuln/detail/{v['cve_id']}"},
+        "description": v.get("description", ""),
+        "affects": [{"ref": ref}],
+        "properties": _props(kev=v.get("kev"), kev_ransomware=v.get("kev_ransomware") or None,
+                             epss=v.get("epss"), confidence=v.get("confidence"), status=v.get("status"),
+                             matched_cpe=v.get("cpe")),
+    }
+    if v.get("cvss") is not None:
+        out["ratings"] = [{"score": v["cvss"], "severity": (v.get("severity") or "unknown").lower(),
+                           "method": "CVSSv4" if (v.get("vector") or "").startswith("CVSS:4") else "CVSSv31",
+                           **({"vector": v["vector"]} if v.get("vector") else {})}]
+    if v.get("published"):
+        out["published"] = v["published"]
+    return out
 
 
 FORMATS = {"inventory": inventory_json, "cyclonedx": cyclonedx_json, "summary": summary_json}
